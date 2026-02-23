@@ -418,8 +418,8 @@ class Game:
         """Vytvoří hru pro daný level"""
         games = [
             SimonSays(),
-            Maze(),
             ButtonFinder(),
+            Maze(),
             TetrisLite(),
             Game2048(),
             BalanceGame(),
@@ -433,9 +433,9 @@ class Game:
             NumberSort(),
             ImageMatch(),
             ReactionTime(),
-            Hangman(),
-            ColorBlind(),
-            ButtonFinder(),
+            PipeConnect(),
+            LaserMirrors(),
+            FindDifferences(),
             MasterChallenge()
         ]
         return games[level_num - 1]
@@ -496,7 +496,7 @@ class Game:
                             self.pause_menu_open = not self.pause_menu_open
                     elif not self.level_completed and not self.pause_menu_open:
                         self.current_game.handle_event(event)
-                        if event.key == pygame.K_h:
+                        if event.key == pygame.K_n:
                             self.show_hint_popup = True
                             self.hint_popup_timer = 400
     
@@ -596,10 +596,11 @@ class Maze(BaseGame):
         self.goal_y = 900
         self.walls = self.generate_maze()
         self.player_size = 15
-        self.speed = 5
+        self.speed = 8
+        self.keys_pressed = set()
     
     def generate_maze(self):
-        """Generuje bludiště s klasickou strukturou"""
+        """Generuje bludiště po celé mapě s řadou cest"""
         walls = []
         
         walls.append(pygame.Rect(0, 0, SCREEN_WIDTH, 20))
@@ -608,36 +609,42 @@ class Maze(BaseGame):
         walls.append(pygame.Rect(SCREEN_WIDTH - 20, 0, 20, SCREEN_HEIGHT))
         
         maze_pattern = [
-            pygame.Rect(300, 100, 20, 400),
-            pygame.Rect(600, 200, 20, 500),
-            pygame.Rect(900, 80, 20, 450),
-            pygame.Rect(1200, 300, 20, 400),
-            pygame.Rect(1500, 150, 20, 550),
-            pygame.Rect(200, 500, 400, 20),
-            pygame.Rect(500, 350, 400, 20),
-            pygame.Rect(750, 600, 450, 20),
-            pygame.Rect(1100, 200, 300, 20),
-            pygame.Rect(1350, 700, 400, 20),
-            pygame.Rect(400, 750, 500, 20),
-            pygame.Rect(1050, 550, 300, 20),
+            pygame.Rect(200, 150, 30, 600),
+            pygame.Rect(500, 100, 30, 450),
+            pygame.Rect(800, 300, 30, 550),
+            pygame.Rect(1100, 150, 30, 500),
+            pygame.Rect(1400, 200, 30, 600),
+            pygame.Rect(1700, 100, 30, 400),
+            pygame.Rect(300, 800, 800, 30),
+            pygame.Rect(600, 500, 700, 30),
+            pygame.Rect(350, 300, 500, 30),
+            pygame.Rect(900, 650, 400, 30),
+            pygame.Rect(1200, 400, 600, 30),
+            pygame.Rect(1500, 750, 300, 30),
+            pygame.Rect(100, 450, 300, 30),
+            pygame.Rect(1600, 550, 200, 30),
         ]
         walls.extend(maze_pattern)
         return walls
     
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
-            self.move(event.key)
+            self.keys_pressed.add(event.key)
+        elif event.type == pygame.KEYUP:
+            self.keys_pressed.discard(event.key)
     
-    def move(self, key):
+    def update(self):
+        """Kontinuální pohyb na základě stisknutých kláves"""
+        keys = self.keys_pressed
         new_x, new_y = self.player_x, self.player_y
         
-        if key in [pygame.K_w, pygame.K_UP]:
+        if pygame.K_w in keys or pygame.K_UP in keys:
             new_y -= self.speed
-        elif key in [pygame.K_s, pygame.K_DOWN]:
+        if pygame.K_s in keys or pygame.K_DOWN in keys:
             new_y += self.speed
-        elif key in [pygame.K_a, pygame.K_LEFT]:
+        if pygame.K_a in keys or pygame.K_LEFT in keys:
             new_x -= self.speed
-        elif key in [pygame.K_d, pygame.K_RIGHT]:
+        if pygame.K_d in keys or pygame.K_RIGHT in keys:
             new_x += self.speed
         
         player_rect = pygame.Rect(new_x - self.player_size, new_y - self.player_size, self.player_size * 2, self.player_size * 2)
@@ -667,7 +674,7 @@ class Maze(BaseGame):
         
         pygame.draw.circle(screen, CYAN, (self.player_x, self.player_y), self.player_size)
         
-        instr = FONT_SMALL.render("WSAD nebo ŠIPKY - Naviguj k cíli (zelený kruh)", True, WHITE)
+        instr = FONT_SMALL.render("DRŽÍ WSAD nebo ŠIPKY - Naviguj k cíli (zelený kruh)", True, WHITE)
         screen.blit(instr, (20, SCREEN_HEIGHT - 50))
     
     def get_hint(self):
@@ -1767,13 +1774,13 @@ class NumberSort(BaseGame):
 
 
 class ImageMatch(BaseGame):
-    """Kombinuj stejné obrázky"""
+    """Najdi párová slova"""
     def __init__(self):
         super().__init__()
-        self.symbols = ['🔥', '💧', '🌪️', '⚡', '🎯', '💎']
+        self.words = ['OHEŇ', 'VODA', 'VZDUCH', 'PŘÍRODA', 'HVĚZDA', 'JEZERO']
         self.pairs = []
-        for sym in self.symbols:
-            self.pairs.extend([sym, sym])
+        for word in self.words:
+            self.pairs.extend([word, word])
         random.shuffle(self.pairs)
         self.matched = [False] * 12
         self.selected = []
@@ -1800,8 +1807,8 @@ class ImageMatch(BaseGame):
     
     def draw(self, screen):
         screen.fill(DARK_BLUE)
-        title = FONT_LARGE.render("KOMBINUJ OBRÁZKY", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH//2 - 200, 30))
+        title = FONT_LARGE.render("KOMBINUJ SLOVA", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 180, 30))
         
         for i in range(12):
             x = 200 + (i % 6) * 200
@@ -1809,29 +1816,32 @@ class ImageMatch(BaseGame):
             color = GREEN if self.matched[i] else BLUE
             pygame.draw.rect(screen, color, pygame.Rect(x, y, 150, 150))
             if self.matched[i]:
-                text = FONT_LARGE.render(self.pairs[i], True, YELLOW)
-                screen.blit(text, (x + 50, y + 50))
+                text = FONT_TINY.render(self.pairs[i], True, YELLOW)
+                text_rect = text.get_rect(center=(x + 75, y + 75))
+                screen.blit(text, text_rect)
             pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 150, 150), 3)
         
         info = FONT_SMALL.render(f"Páry: {self.matches}/6", True, WHITE)
         screen.blit(info, (SCREEN_WIDTH//2 - 100, 700))
     
     def get_hint(self):
-        return "Najdi stejné obrázky!"
+        return "Najdi stejná slova!"
 
 
 class ReactionTime(BaseGame):
-    """Test reflexu - klikni když změní barvu"""
+    """Test reflexu - čekej a klikni když změní barvu"""
     def __init__(self):
         super().__init__()
         self.timer = 0
         self.show_target = False
         self.start_time = 0
         self.reaction_time = 0
+        self.color_phase = 0
+        self.change_timer = random.randint(120, 300)
     
     def update(self):
         self.timer += 1
-        if self.timer == random.randint(60, 300):
+        if self.timer == self.change_timer:
             self.show_target = True
             self.start_time = self.timer
     
@@ -1848,18 +1858,21 @@ class ReactionTime(BaseGame):
         title = FONT_LARGE.render("REFLEX TEST", True, CYAN)
         screen.blit(title, (SCREEN_WIDTH//2 - 150, 50))
         
-        box_color = GREEN if self.show_target else RED
-        pygame.draw.rect(screen, box_color, pygame.Rect(600, 300, 600, 400))
-        
         if self.show_target:
+            progress = (self.timer - self.start_time) / 20
+            size = int(600 + progress * 100)
+            box_x = SCREEN_WIDTH//2 - size//2
+            box_y = 300 - size//4
+            pygame.draw.rect(screen, GREEN, pygame.Rect(box_x, box_y, size, size // 2))
             text = FONT_LARGE.render("KLIKNI!", True, YELLOW)
             screen.blit(text, (SCREEN_WIDTH//2 - 100, 450))
         else:
-            text = FONT_MEDIUM.render("Čekej na barvu...", True, WHITE)
-            screen.blit(text, (SCREEN_WIDTH//2 - 200, 450))
+            pygame.draw.rect(screen, RED, pygame.Rect(600, 300, 600, 400))
+            text = FONT_MEDIUM.render("Čekej na změnu barvy...", True, WHITE)
+            screen.blit(text, (SCREEN_WIDTH//2 - 250, 450))
     
     def get_hint(self):
-        return "Klikni co nejrychleji!"
+        return "Čekej na zelenou barvu a klikni!"
 
 
 class Hangman(BaseGame):
@@ -1981,6 +1994,293 @@ class MasterChallenge(BaseGame):
         return "Dej to všechno dohromady!"
 
 
+class PipeConnect(BaseGame):
+    """Otočení trubek - propoj zdroj s cílem"""
+    def __init__(self):
+        super().__init__()
+        self.grid_size = 4
+        self.cell_size = 100
+        self.pipes = self.create_grid()
+        self.start_pos = (0, 1)
+        self.end_pos = (3, 2)
+        self.water_timer = 0
+    
+    def create_grid(self):
+        pipes = []
+        for row in range(self.grid_size):
+            pipe_row = []
+            for col in range(self.grid_size):
+                rotation = random.randint(0, 3)
+                pipe_type = random.choice(["straight", "corner"])
+                pipe_row.append({"type": pipe_type, "rotation": rotation})
+            pipes.append(pipe_row)
+        pipes[self.start_pos[0]][self.start_pos[1]] = {"type": "start", "rotation": 0}
+        pipes[self.end_pos[0]][self.end_pos[1]] = {"type": "end", "rotation": 0}
+        return pipes
+    
+    def is_connected(self):
+        """Kontrola zda jsou trubky správně připojeny"""
+        visited = set()
+        queue = [self.start_pos]
+        
+        while queue:
+            pos = queue.pop(0)
+            if pos in visited:
+                continue
+            visited.add(pos)
+            
+            if pos == self.end_pos:
+                return True
+            
+            row, col = pos
+            pipe = self.pipes[row][col]
+            rotation = pipe["rotation"]
+            
+            connections = self.get_connections(pipe["type"], rotation)
+            for direction in connections:
+                next_pos = self.move_in_direction(pos, direction)
+                if next_pos and next_pos not in visited:
+                    next_pipe = self.pipes[next_pos[0]][next_pos[1]]
+                    opposite = self.opposite_direction(direction)
+                    next_connections = self.get_connections(next_pipe["type"], next_pipe["rotation"])
+                    if opposite in next_connections:
+                        queue.append(next_pos)
+        
+        return False
+    
+    def get_connections(self, pipe_type, rotation):
+        """Vrací spojení trubky v daném otočení"""
+        if pipe_type == "straight":
+            if rotation in [0, 2]:
+                return ["up", "down"]
+            else:
+                return ["left", "right"]
+        elif pipe_type == "corner":
+            corners = [
+                ["up", "right"],
+                ["right", "down"],
+                ["down", "left"],
+                ["left", "up"]
+            ]
+            return corners[rotation]
+        elif pipe_type in ["start", "end"]:
+            return ["down"] if pipe_type == "start" else ["up"]
+        return []
+    
+    def move_in_direction(self, pos, direction):
+        row, col = pos
+        if direction == "up" and row > 0:
+            return (row - 1, col)
+        elif direction == "down" and row < self.grid_size - 1:
+            return (row + 1, col)
+        elif direction == "left" and col > 0:
+            return (row, col - 1)
+        elif direction == "right" and col < self.grid_size - 1:
+            return (row, col + 1)
+        return None
+    
+    def opposite_direction(self, direction):
+        opposites = {"up": "down", "down": "up", "left": "right", "right": "left"}
+        return opposites[direction]
+    
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            pos = event.pos
+            for row in range(self.grid_size):
+                for col in range(self.grid_size):
+                    x = 400 + col * self.cell_size
+                    y = 250 + row * self.cell_size
+                    rect = pygame.Rect(x, y, self.cell_size, self.cell_size)
+                    if rect.collidepoint(pos):
+                        if self.pipes[row][col]["type"] not in ["start", "end"]:
+                            self.pipes[row][col]["rotation"] = (self.pipes[row][col]["rotation"] + 1) % 4
+                        if self.is_connected():
+                            self.won = True
+    
+    def draw(self, screen):
+        screen.fill(DARK_BLUE)
+        
+        title = FONT_LARGE.render("OTOČENÍ TRUBEK", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 180, 30))
+        
+        for row in range(self.grid_size):
+            for col in range(self.grid_size):
+                x = 400 + col * self.cell_size
+                y = 250 + row * self.cell_size
+                pipe = self.pipes[row][col]
+                
+                color = GREEN if (row, col) == self.start_pos else RED if (row, col) == self.end_pos else BLUE
+                pygame.draw.rect(screen, color, pygame.Rect(x, y, self.cell_size, self.cell_size))
+                pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, self.cell_size, self.cell_size), 2)
+                
+                if pipe["type"] == "straight":
+                    angle = pipe["rotation"] * 90
+                    if angle % 180 == 0:
+                        pygame.draw.line(screen, YELLOW, (x + 50, y + 20), (x + 50, y + 80), 3)
+                    else:
+                        pygame.draw.line(screen, YELLOW, (x + 20, y + 50), (x + 80, y + 50), 3)
+                elif pipe["type"] == "corner":
+                    rotation = pipe["rotation"]
+                    points = [
+                        [(x + 50, y + 20), (x + 50, y + 50), (x + 80, y + 50)],
+                        [(x + 20, y + 50), (x + 50, y + 50), (x + 50, y + 80)],
+                        [(x + 50, y + 80), (x + 50, y + 50), (x + 20, y + 50)],
+                        [(x + 80, y + 50), (x + 50, y + 50), (x + 50, y + 20)]
+                    ]
+                    pygame.draw.lines(screen, YELLOW, points[rotation], 3)
+        
+        instr = FONT_SMALL.render("Klikni na trubku pro otočení - propoj zdroj s cílem", True, WHITE)
+        screen.blit(instr, (SCREEN_WIDTH//2 - 310, 700))
+    
+    def get_hint(self):
+        return "Otáčej trubky, aby se zdroj (zelený) připojil k cíli (červený)"
+
+
+class LaserMirrors(BaseGame):
+    """Laserová zrcadla - nasměruj laser na cíl"""
+    def __init__(self):
+        super().__init__()
+        self.laser_start = (100, 540)
+        self.laser_direction = 0
+        self.target = (1800, 540)
+        self.mirrors = [
+            {"pos": (600, 400), "angle": 45},
+            {"pos": (1200, 600), "angle": 45},
+            {"pos": (1500, 400), "angle": 45}
+        ]
+        self.laser_path = []
+    
+    def trace_laser(self):
+        """Vysleduje cestu laseru skrz zrcadla"""
+        self.laser_path = [(self.laser_start, self.laser_direction)]
+        pos = list(self.laser_start)
+        direction = self.laser_direction
+        max_steps = 100
+        
+        for _ in range(max_steps):
+            next_pos = (pos[0] + 20 * math.cos(math.radians(direction)), 
+                       pos[1] + 20 * math.sin(math.radians(direction)))
+            
+            for mirror in self.mirrors:
+                mx, my = mirror["pos"]
+                if abs(next_pos[0] - mx) < 30 and abs(next_pos[1] - my) < 30:
+                    direction = (direction + 2 * mirror["angle"]) % 360
+                    self.laser_path.append((next_pos, direction))
+            
+            if self.distance(next_pos, self.target) < 50:
+                self.won = True
+                return
+            
+            pos = next_pos
+            if pos[0] < 0 or pos[0] > SCREEN_WIDTH or pos[1] < 0 or pos[1] > SCREEN_HEIGHT:
+                break
+    
+    def distance(self, p1, p2):
+        return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+    
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            pos = event.pos
+            for mirror in self.mirrors:
+                mx, my = mirror["pos"]
+                if pygame.Rect(mx - 30, my - 30, 60, 60).collidepoint(pos):
+                    mirror["angle"] = (mirror["angle"] + 45) % 360
+                    self.trace_laser()
+    
+    def draw(self, screen):
+        screen.fill(DARK_BLUE)
+        
+        title = FONT_LARGE.render("LASEROVÁ ZRCADLA", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 200, 30))
+        
+        pygame.draw.circle(screen, GREEN, self.laser_start, 15)
+        pygame.draw.circle(screen, RED, self.target, 15)
+        
+        for mirror in self.mirrors:
+            mx, my = mirror["pos"]
+            pygame.draw.rect(screen, YELLOW, pygame.Rect(mx - 20, my - 20, 40, 40))
+            angle = mirror["angle"]
+            end_x = mx + 30 * math.cos(math.radians(angle))
+            end_y = my + 30 * math.sin(math.radians(angle))
+            pygame.draw.line(screen, WHITE, (mx - 30 * math.cos(math.radians(angle)), 
+                                             my - 30 * math.sin(math.radians(angle))),
+                            (end_x, end_y), 2)
+        
+        if self.laser_path:
+            for i in range(len(self.laser_path) - 1):
+                pos, direction = self.laser_path[i]
+                next_pos, _ = self.laser_path[i + 1] if i + 1 < len(self.laser_path) else (list(pos), direction)
+                pygame.draw.line(screen, CYAN, pos, next_pos, 3)
+        
+        instr = FONT_SMALL.render("Klikni na zrcadla pro otočení - vede laser k červenému cíli", True, WHITE)
+        screen.blit(instr, (SCREEN_WIDTH//2 - 330, 700))
+    
+    def get_hint(self):
+        return "Otáčej zrcadla tak, aby laser (zelená kroužek) dosáhl cíle (červený kroužek)"
+
+
+class FindDifferences(BaseGame):
+    """Najdi rozdíly - klikej na rozdíly mezi dvěma obrázky"""
+    def __init__(self):
+        super().__init__()
+        self.differences = [
+            {"pos": (400, 300), "radius": 20},
+            {"pos": (800, 450), "radius": 15},
+            {"pos": (650, 250), "radius": 18},
+            {"pos": (550, 500), "radius": 12},
+            {"pos": (900, 200), "radius": 16}
+        ]
+        self.found = [False] * len(self.differences)
+        self.total_differences = len(self.differences)
+    
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            pos = event.pos
+            for i, diff in enumerate(self.differences):
+                if self.distance(pos, diff["pos"]) < diff["radius"] + 10:
+                    self.found[i] = True
+            
+            if all(self.found):
+                self.won = True
+    
+    def distance(self, p1, p2):
+        return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+    
+    def draw(self, screen):
+        screen.fill(DARK_BLUE)
+        
+        title = FONT_LARGE.render("NAJDI ROZDÍLY", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 150, 20))
+        
+        progress = FONT_MEDIUM.render(f"NALEZENO: {sum(self.found)}/{self.total_differences}", True, YELLOW)
+        screen.blit(progress, (SCREEN_WIDTH//2 - 150, 100))
+        
+        left_text = FONT_SMALL.render("VLEVO", True, WHITE)
+        right_text = FONT_SMALL.render("VPRAVO", True, WHITE)
+        screen.blit(left_text, (300, 180))
+        screen.blit(right_text, (1300, 180))
+        
+        pygame.draw.rect(screen, BLUE, pygame.Rect(150, 220, 350, 500))
+        pygame.draw.rect(screen, BLUE, pygame.Rect(1420, 220, 350, 500))
+        
+        for i, diff in enumerate(self.differences):
+            if not self.found[i]:
+                pygame.draw.circle(screen, RED, diff["pos"], diff["radius"])
+                pygame.draw.circle(screen, RED, (diff["pos"][0] + 1220, diff["pos"][1]), diff["radius"])
+            else:
+                pygame.draw.circle(screen, GREEN, diff["pos"], diff["radius"])
+                pygame.draw.circle(screen, GREEN, (diff["pos"][0] + 1220, diff["pos"][1]), diff["radius"])
+        
+        instr = FONT_SMALL.render("Klikni na všechny rozdíly v obrázku vpravo", True, WHITE)
+        screen.blit(instr, (SCREEN_WIDTH//2 - 300, 800))
+    
+    def get_hint(self):
+        found_count = sum(self.found)
+        remaining = self.total_differences - found_count
+        return f"Zbývá najít {remaining} rozdílů"
+
+
 if __name__ == "__main__":
     game = Game()
     game.run()
+
