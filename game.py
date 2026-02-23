@@ -746,17 +746,16 @@ class TetrisLite(BaseGame):
     def __init__(self):
         super().__init__()
         self.grid = [[0] * 6 for _ in range(10)]
-        self.piece = self.new_piece()
-        self.piece_x = 2
-        self.piece_y = 0
-        self.fall_timer = 0
-        self.lines_cleared = 0
-        
         self.pieces = [
             [[1, 1], [1, 1]],  
             [[1, 1, 1, 1]],    
             [[1, 1, 1], [1, 0, 0]],  
         ]
+        self.piece = self.new_piece()
+        self.piece_x = 2
+        self.piece_y = 0
+        self.fall_timer = 0
+        self.lines_cleared = 0
     
     def new_piece(self):
         return random.choice(self.pieces)
@@ -994,14 +993,12 @@ class Game2048(BaseGame):
                 else:
                     merged.append(tiles[j])
                     j += 1
-            # Umístit na konec (down = reverse)
             for j in range(len(merged)):
                 new_grid[i][3 - len(merged) + j] = merged[j]
         
         if new_grid != self.grid:
             changed = True
         self.grid = new_grid
-        # Vrť transponovanou mřížku
         self.grid = [list(row) for row in zip(*self.grid)]
         return changed
     
