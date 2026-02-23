@@ -480,6 +480,8 @@ class Game:
                         self.current_game.handle_event(event)
             
             elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_o:
+                    self.unlocked_levels = 20
                 if self.state == GameState.GAME:
                     if event.key == pygame.K_ESCAPE:
                         if not self.level_completed:
@@ -589,24 +591,30 @@ class Maze(BaseGame):
         self.speed = 5
     
     def generate_maze(self):
-        """Generuje jednoduché bludiště"""
+        """Generuje bludiště s více zdmi"""
         walls = []
-        # Horní a dolní stěna
         for x in range(0, SCREEN_WIDTH, 40):
             walls.append(pygame.Rect(x, 0, 40, 30))
             walls.append(pygame.Rect(x, SCREEN_HEIGHT - 30, 40, 30))
-        # Levá a pravá stěna
         for y in range(0, SCREEN_HEIGHT, 40):
             walls.append(pygame.Rect(0, y, 30, 40))
             walls.append(pygame.Rect(SCREEN_WIDTH - 30, y, 30, 40))
         
-        # Interní zdi
         internal_walls = [
             pygame.Rect(300, 150, 400, 30),
             pygame.Rect(600, 400, 300, 30),
             pygame.Rect(200, 450, 200, 30),
             pygame.Rect(800, 200, 30, 300),
             pygame.Rect(400, 550, 400, 30),
+            pygame.Rect(150, 300, 30, 250),
+            pygame.Rect(500, 250, 300, 30),
+            pygame.Rect(900, 400, 30, 200),
+            pygame.Rect(350, 600, 250, 30),
+            pygame.Rect(700, 150, 30, 200),
+            pygame.Rect(200, 650, 300, 30),
+            pygame.Rect(1200, 300, 30, 350),
+            pygame.Rect(600, 600, 200, 30),
+            pygame.Rect(1000, 650, 200, 30),
         ]
         walls.extend(internal_walls)
         return walls
@@ -722,7 +730,7 @@ class SimonSays(BaseGame):
         if self.player_sequence[-1] != self.sequence[len(self.player_sequence) - 1]:
             self.lost = True
         elif len(self.player_sequence) == len(self.sequence):
-            if len(self.sequence) == 7:
+            if len(self.sequence) == 5:
                 self.won = True
             else:
                 self.sequence.append(random.randint(0, 3))
