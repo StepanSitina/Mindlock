@@ -84,6 +84,9 @@ class Game:
         self.completed_levels = set()
         self.show_coming_soon = False
         self.coming_soon_timer = 0
+        self.space_pressed = False
+        self.space_press_count = 0
+        self.space_press_timer = 0
         
 
         self.patch_notes = [
@@ -520,11 +523,15 @@ class Game:
                     if event.key == pygame.K_ESCAPE:
                         if not self.level_completed:
                             self.pause_menu_open = not self.pause_menu_open
-                    elif not self.level_completed and not self.pause_menu_open:
-                        self.current_game.handle_event(event)
-                        if event.key == pygame.K_n:
+                    elif event.key == pygame.K_SPACE:
+                        self.space_press_count += 1
+                        self.space_press_timer = 15
+                        if self.space_press_count >= 2 and not self.level_completed and not self.pause_menu_open:
                             self.show_hint_popup = True
                             self.hint_popup_timer = 400
+                            self.space_press_count = 0
+                    elif not self.level_completed and not self.pause_menu_open:
+                        self.current_game.handle_event(event)
     
     def update(self):
         """Aktualizuje stav hry"""
@@ -548,6 +555,11 @@ class Game:
             self.coming_soon_timer -= 1
         else:
             self.show_coming_soon = False
+        
+        if self.space_press_timer > 0:
+            self.space_press_timer -= 1
+        else:
+            self.space_press_count = 0
     
     def draw(self):
         """Kreslí vše na obrazovku"""
@@ -621,15 +633,20 @@ class Maze(BaseGame):
     """Bludiště s lepší strukturou - naviguj k cíli"""
     def __init__(self):
         super().__init__()
+        self.CELL_SIZE = 30
+        self.COLS = 64
+        self.ROWS = 36
+        try:
+            self.grid = self.create_grid()
+            self.generate_maze()
+        except Exception as e:
+            print(f"Maze init error: {e}")
+            self.grid = [[self.Cell(x, y) for y in range(self.ROWS)] for x in range(self.COLS)]
+        
         self.player_x = 0
         self.player_y = 0
         self.goal_x = 63
         self.goal_y = 35
-        self.CELL_SIZE = 30
-        self.COLS = 64
-        self.ROWS = 36
-        self.grid = self.create_grid()
-        self.generate_maze()
         self.speed = 1
         self.keys_pressed = set()
     
@@ -690,56 +707,67 @@ class Maze(BaseGame):
     
     def update(self):
         """Kontinuální pohyb na základě stisknutých kláves"""
-        if not self.keys_pressed:
+        if not self.keys_pressed or not self.grid:
             return
         
-        keys = self.keys_pressed
-        cell = self.grid[self.player_x][self.player_y]
-        new_x, new_y = self.player_x, self.player_y
-        
-        if (pygame.K_w in keys or pygame.K_UP in keys) and not cell.walls[0]:
-            new_y -= self.speed
-        if (pygame.K_s in keys or pygame.K_DOWN in keys) and not cell.walls[2]:
-            new_y += self.speed
-        if (pygame.K_a in keys or pygame.K_LEFT in keys) and not cell.walls[3]:
-            new_x -= self.speed
-        if (pygame.K_d in keys or pygame.K_RIGHT in keys) and not cell.walls[1]:
-            new_x += self.speed
-        
-        if 0 <= new_x < self.COLS and 0 <= new_y < self.ROWS:
-            self.player_x = new_x
-            self.player_y = new_y
-        
-        if self.player_x == self.goal_x and self.player_y == self.goal_y:
-            self.won = True
+        try:
+            keys = self.keys_pressed
+            if self.player_x < 0 or self.player_x >= self.COLS or self.player_y < 0 or self.player_y >= self.ROWS:
+                self.player_x = 0
+                self.player_y = 0
+                return
+            
+            cell = self.grid[self.player_x][self.player_y]
+            new_x, new_y = self.player_x, self.player_y
+            
+            if (pygame.K_w in keys or pygame.K_UP in keys) and not cell.walls[0]:
+                new_y -= self.speed
+            if (pygame.K_s in keys or pygame.K_DOWN in keys) and not cell.walls[2]:
+                new_y += self.speed
+            if (pygame.K_a in keys or pygame.K_LEFT in keys) and not cell.walls[3]:
+                new_x -= self.speed
+            if (pygame.K_d in keys or pygame.K_RIGHT in keys) and not cell.walls[1]:
+                new_x += self.speed
+            
+            if 0 <= new_x < self.COLS and 0 <= new_y < self.ROWS:
+                self.player_x = new_x
+                self.player_y = new_y
+            
+            if self.player_x == self.goal_x and self.player_y == self.goal_y:
+                self.won = True
+        except Exception as e:
+            print(f"Maze update error: {e}")
     
     def draw(self, screen):
         screen.fill(DARK_BLUE)
         
-        for column in self.grid:
-            for cell in column:
-                x = cell.x * self.CELL_SIZE
-                y = cell.y * self.CELL_SIZE
-                
-                if cell.walls[0]:
-                    pygame.draw.line(screen, GRAY, (x, y), (x + self.CELL_SIZE, y), 2)
-                if cell.walls[1]:
-                    pygame.draw.line(screen, GRAY, (x + self.CELL_SIZE, y), (x + self.CELL_SIZE, y + self.CELL_SIZE), 2)
-                if cell.walls[2]:
-                    pygame.draw.line(screen, GRAY, (x + self.CELL_SIZE, y + self.CELL_SIZE), (x, y + self.CELL_SIZE), 2)
-                if cell.walls[3]:
-                    pygame.draw.line(screen, GRAY, (x, y + self.CELL_SIZE), (x, y), 2)
-        
-        goal_x = self.goal_x * self.CELL_SIZE + self.CELL_SIZE // 2
-        goal_y = self.goal_y * self.CELL_SIZE + self.CELL_SIZE // 2
-        pygame.draw.rect(screen, GREEN, pygame.Rect(self.goal_x * self.CELL_SIZE + 5, self.goal_y * self.CELL_SIZE + 5, self.CELL_SIZE - 10, self.CELL_SIZE - 10))
-        
-        player_x = self.player_x * self.CELL_SIZE + self.CELL_SIZE // 2
-        player_y = self.player_y * self.CELL_SIZE + self.CELL_SIZE // 2
-        pygame.draw.circle(screen, CYAN, (player_x, player_y), self.CELL_SIZE // 3)
-        
-        instr = FONT_SMALL.render("DRŽÍ WSAD nebo ŠIPKY - Naviguj k cíli (zelený čtverec)", True, WHITE)
-        screen.blit(instr, (20, SCREEN_HEIGHT - 50))
+        try:
+            if self.grid:
+                for column in self.grid:
+                    for cell in column:
+                        x = cell.x * self.CELL_SIZE
+                        y = cell.y * self.CELL_SIZE
+                        
+                        if x < SCREEN_WIDTH and y < SCREEN_HEIGHT:
+                            if cell.walls[0]:
+                                pygame.draw.line(screen, GRAY, (x, y), (min(x + self.CELL_SIZE, SCREEN_WIDTH), y), 2)
+                            if cell.walls[1]:
+                                pygame.draw.line(screen, GRAY, (x + self.CELL_SIZE, y), (x + self.CELL_SIZE, min(y + self.CELL_SIZE, SCREEN_HEIGHT)), 2)
+                            if cell.walls[2]:
+                                pygame.draw.line(screen, GRAY, (min(x + self.CELL_SIZE, SCREEN_WIDTH), y + self.CELL_SIZE), (x, y + self.CELL_SIZE), 2)
+                            if cell.walls[3]:
+                                pygame.draw.line(screen, GRAY, (x, min(y + self.CELL_SIZE, SCREEN_HEIGHT)), (x, y), 2)
+            
+            pygame.draw.rect(screen, GREEN, pygame.Rect(self.goal_x * self.CELL_SIZE + 5, self.goal_y * self.CELL_SIZE + 5, self.CELL_SIZE - 10, self.CELL_SIZE - 10))
+            
+            player_x = self.player_x * self.CELL_SIZE + self.CELL_SIZE // 2
+            player_y = self.player_y * self.CELL_SIZE + self.CELL_SIZE // 2
+            pygame.draw.circle(screen, CYAN, (player_x, player_y), self.CELL_SIZE // 3)
+            
+            instr = FONT_SMALL.render("2x SPACE - Nápověda | DRŽÍ WSAD/ŠIPKY - Pohyb", True, WHITE)
+            screen.blit(instr, (20, SCREEN_HEIGHT - 50))
+        except Exception as e:
+            print(f"Maze draw error: {e}")
     
     def get_hint(self):
         return "Pohybuj se WSAD/šipkami. Najdi cestu!"
