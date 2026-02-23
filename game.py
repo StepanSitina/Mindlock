@@ -81,6 +81,9 @@ class Game:
         self.pause_menu_open = False
         self.show_hint_popup = False
         self.hint_popup_timer = 0
+        self.completed_levels = set()
+        self.show_coming_soon = False
+        self.coming_soon_timer = 0
         
 
         self.patch_notes = [
@@ -88,8 +91,9 @@ class Game:
             {"version": "1.1.0", "notes": ["Opravena mechanika levelů", "Přidány nápovědy"]},
             {"version": "1.2.0", "notes": ["Hezčí a moderní menu", "Opravena logika 2048", "Přidán delay v Simon Says", "Patch notes nyní v Pop-up okně"]},
             {"version": "1.3.0", "notes": ["Opravena chyba SimonSays s nekonečnou smyčkou", "Opravena inicializace TetrisLite", "Odstraněny všechny komentáře ze kódu", "Opraveny chyby v souboru"]},
-            {"version": "1.4.0", "notes": ["Nápověda jako popup okno (stiskni H)", "Pause menu s ESC klávesou", "Tlačítka: Continue, Restart (odemyka level 2), Exit", "Simon Says nyní vyžaduje 5 kol místo 7"]},
-            {"version": "1.5.0", "notes": ["Bludiště má nyní mnohem více zdí (164 přesně)", "Přidán tajný admin mode - stiskni O pro odemknutí všech levelů", "Vylepšená herní vyvážená obtížnost", "Patch notes aktualizovány po každé změně"]}
+            {"version": "1.4.0", "notes": ["Nápověda jako popup okno (stiskni N)", "Pause menu s ESC klávesou", "Tlačítka: Continue, Restart (odemyka level 2), Exit", "Simon Says nyní vyžaduje 5 kol místo 7"]},
+            {"version": "1.5.0", "notes": ["Bludiště má nyní mnohem více zdí", "Přidán tajný admin mode", "Vylepšená herní vyvážená obtížnost", "Patch notes aktualizovány po každé změně"]},
+            {"version": "1.6.0", "notes": ["Bludiště s DFS algoritmem - překrásné", "Coming Soon popup pro hotové levely", "Nápověda přesunuta na N klávesu", "Maze hra zcela přepracována"]}
         ]
         
         self.version = self.patch_notes[-1]["version"]
@@ -267,7 +271,12 @@ class Game:
         for level_num, button in self.level_buttons.items():
       
             if level_num <= self.unlocked_levels:
-                button.draw(self.screen)
+                if level_num in self.completed_levels:
+                    pygame.draw.rect(self.screen, GREEN, button.rect)
+                    pygame.draw.rect(self.screen, YELLOW, button.rect, 3)
+                    done_text = FONT_SMALL.render(f"LEVEL {level_num}", True, BLACK)
+                else:
+                    button.draw(self.screen)
             else:
                 pygame.draw.rect(self.screen, DARK_GRAY, button.rect)
                 pygame.draw.rect(self.screen, GRAY, button.rect, 3)
@@ -276,6 +285,16 @@ class Game:
                 self.screen.blit(lock_text, lock_rect)
         
         self.play_buttons["back"].draw(self.screen)
+        
+        if self.show_coming_soon:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+            overlay.set_alpha(200)
+            overlay.fill(BLACK)
+            self.screen.blit(overlay, (0, 0))
+            
+            coming_text = FONT_LARGE.render("COMING SOON", True, YELLOW)
+            coming_rect = coming_text.get_rect(center=(SCREEN_WIDTH//2, SCREEN_HEIGHT//2))
+            self.screen.blit(coming_text, coming_rect)
     
     def draw_popup_menu(self):
         """Kreslí popup menu po skončení levelu"""
@@ -374,11 +393,15 @@ class Game:
         """Zpracuje klik v play menu"""
         for level_num, button in self.level_buttons.items():
             if level_num <= self.unlocked_levels and button.is_clicked(pos):
-                self.current_level = level_num
-                self.state = GameState.GAME
-                self.game_won = False
-                self.level_completed = False
-                self.current_game = self.create_game_level(level_num)
+                if level_num in self.completed_levels:
+                    self.show_coming_soon = True
+                    self.coming_soon_timer = 180
+                else:
+                    self.current_level = level_num
+                    self.state = GameState.GAME
+                    self.game_won = False
+                    self.level_completed = False
+                    self.current_game = self.create_game_level(level_num)
                 return
         
         if self.play_buttons["back"].is_clicked(pos):
@@ -386,6 +409,9 @@ class Game:
     
     def handle_popup_click(self, pos):
         """Zpracuje klik v popup menu"""
+        if self.game_won:
+            self.completed_levels.add(self.current_level)
+        
         if self.popup_buttons["menu"].is_clicked(pos):
             self.state = GameState.PLAYING
         elif self.popup_buttons["restart"].is_clicked(pos):
@@ -517,6 +543,11 @@ class Game:
             self.hint_popup_timer -= 1
         else:
             self.show_hint_popup = False
+        
+        if self.coming_soon_timer > 0:
+            self.coming_soon_timer -= 1
+        else:
+            self.show_coming_soon = False
     
     def draw(self):
         """Kreslí vše na obrazovku"""
@@ -590,42 +621,66 @@ class Maze(BaseGame):
     """Bludiště s lepší strukturou - naviguj k cíli"""
     def __init__(self):
         super().__init__()
-        self.player_x = 100
-        self.player_y = 100
-        self.goal_x = 1800
-        self.goal_y = 900
-        self.walls = self.generate_maze()
-        self.player_size = 15
-        self.speed = 8
+        self.player_x = 0
+        self.player_y = 0
+        self.goal_x = 63
+        self.goal_y = 35
+        self.CELL_SIZE = 30
+        self.COLS = 64
+        self.ROWS = 36
+        self.grid = self.create_grid()
+        self.generate_maze()
+        self.speed = 1
         self.keys_pressed = set()
     
+    def create_grid(self):
+        """Vytvoří mřížku buněk"""
+        return [[self.Cell(x, y) for y in range(self.ROWS)] for x in range(self.COLS)]
+    
+    class Cell:
+        def __init__(self, x, y):
+            self.x = x
+            self.y = y
+            self.walls = [True, True, True, True]
+            self.visited = False
+    
     def generate_maze(self):
-        """Generuje bludiště po celé mapě s řadou cest"""
-        walls = []
+        """Generuje bludiště s DFS algoritmem"""
+        stack = []
+        current = self.grid[0][0]
+        current.visited = True
         
-        walls.append(pygame.Rect(0, 0, SCREEN_WIDTH, 20))
-        walls.append(pygame.Rect(0, SCREEN_HEIGHT - 20, SCREEN_WIDTH, 20))
-        walls.append(pygame.Rect(0, 0, 20, SCREEN_HEIGHT))
-        walls.append(pygame.Rect(SCREEN_WIDTH - 20, 0, 20, SCREEN_HEIGHT))
+        while True:
+            neighbors = self.get_unvisited_neighbors(current)
+            if neighbors:
+                next_cell, direction = random.choice(neighbors)
+                self.remove_walls(current, next_cell, direction)
+                stack.append(current)
+                current = next_cell
+                current.visited = True
+            elif stack:
+                current = stack.pop()
+            else:
+                break
+    
+    def get_unvisited_neighbors(self, cell):
+        """Vrací nenavštívené sousedy buňky"""
+        neighbors = []
+        directions = [(0, -1, 0), (1, 0, 1), (0, 1, 2), (-1, 0, 3)]
         
-        maze_pattern = [
-            pygame.Rect(200, 150, 30, 600),
-            pygame.Rect(500, 100, 30, 450),
-            pygame.Rect(800, 300, 30, 550),
-            pygame.Rect(1100, 150, 30, 500),
-            pygame.Rect(1400, 200, 30, 600),
-            pygame.Rect(1700, 100, 30, 400),
-            pygame.Rect(300, 800, 800, 30),
-            pygame.Rect(600, 500, 700, 30),
-            pygame.Rect(350, 300, 500, 30),
-            pygame.Rect(900, 650, 400, 30),
-            pygame.Rect(1200, 400, 600, 30),
-            pygame.Rect(1500, 750, 300, 30),
-            pygame.Rect(100, 450, 300, 30),
-            pygame.Rect(1600, 550, 200, 30),
-        ]
-        walls.extend(maze_pattern)
-        return walls
+        for dx, dy, dir_idx in directions:
+            nx = cell.x + dx
+            ny = cell.y + dy
+            if 0 <= nx < self.COLS and 0 <= ny < self.ROWS:
+                neighbor = self.grid[nx][ny]
+                if not neighbor.visited:
+                    neighbors.append((neighbor, dir_idx))
+        return neighbors
+    
+    def remove_walls(self, current, next_cell, direction):
+        """Odstraní zdi mezi buňkami"""
+        current.walls[direction] = False
+        next_cell.walls[(direction + 2) % 4] = False
     
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
@@ -635,50 +690,59 @@ class Maze(BaseGame):
     
     def update(self):
         """Kontinuální pohyb na základě stisknutých kláves"""
+        if not self.keys_pressed:
+            return
+        
         keys = self.keys_pressed
+        cell = self.grid[self.player_x][self.player_y]
         new_x, new_y = self.player_x, self.player_y
         
-        if pygame.K_w in keys or pygame.K_UP in keys:
+        if (pygame.K_w in keys or pygame.K_UP in keys) and not cell.walls[0]:
             new_y -= self.speed
-        if pygame.K_s in keys or pygame.K_DOWN in keys:
+        if (pygame.K_s in keys or pygame.K_DOWN in keys) and not cell.walls[2]:
             new_y += self.speed
-        if pygame.K_a in keys or pygame.K_LEFT in keys:
+        if (pygame.K_a in keys or pygame.K_LEFT in keys) and not cell.walls[3]:
             new_x -= self.speed
-        if pygame.K_d in keys or pygame.K_RIGHT in keys:
+        if (pygame.K_d in keys or pygame.K_RIGHT in keys) and not cell.walls[1]:
             new_x += self.speed
         
-        player_rect = pygame.Rect(new_x - self.player_size, new_y - self.player_size, self.player_size * 2, self.player_size * 2)
-        collision = False
-        for wall in self.walls:
-            if player_rect.colliderect(wall):
-                collision = True
-                break
-        
-        if not collision:
+        if 0 <= new_x < self.COLS and 0 <= new_y < self.ROWS:
             self.player_x = new_x
             self.player_y = new_y
         
-        if math.sqrt((self.player_x - self.goal_x)**2 + (self.player_y - self.goal_y)**2) < 40:
+        if self.player_x == self.goal_x and self.player_y == self.goal_y:
             self.won = True
     
     def draw(self, screen):
         screen.fill(DARK_BLUE)
         
-        for wall in self.walls:
-            pygame.draw.rect(screen, GRAY, wall)
+        for column in self.grid:
+            for cell in column:
+                x = cell.x * self.CELL_SIZE
+                y = cell.y * self.CELL_SIZE
+                
+                if cell.walls[0]:
+                    pygame.draw.line(screen, GRAY, (x, y), (x + self.CELL_SIZE, y), 2)
+                if cell.walls[1]:
+                    pygame.draw.line(screen, GRAY, (x + self.CELL_SIZE, y), (x + self.CELL_SIZE, y + self.CELL_SIZE), 2)
+                if cell.walls[2]:
+                    pygame.draw.line(screen, GRAY, (x + self.CELL_SIZE, y + self.CELL_SIZE), (x, y + self.CELL_SIZE), 2)
+                if cell.walls[3]:
+                    pygame.draw.line(screen, GRAY, (x, y + self.CELL_SIZE), (x, y), 2)
         
-        pygame.draw.circle(screen, GREEN, (self.goal_x, self.goal_y), 25)
-        goal_text = FONT_SMALL.render("CÍЛЬ", True, BLACK)
-        goal_rect = goal_text.get_rect(center=(self.goal_x, self.goal_y))
-        screen.blit(goal_text, goal_rect)
+        goal_x = self.goal_x * self.CELL_SIZE + self.CELL_SIZE // 2
+        goal_y = self.goal_y * self.CELL_SIZE + self.CELL_SIZE // 2
+        pygame.draw.rect(screen, GREEN, pygame.Rect(self.goal_x * self.CELL_SIZE + 5, self.goal_y * self.CELL_SIZE + 5, self.CELL_SIZE - 10, self.CELL_SIZE - 10))
         
-        pygame.draw.circle(screen, CYAN, (self.player_x, self.player_y), self.player_size)
+        player_x = self.player_x * self.CELL_SIZE + self.CELL_SIZE // 2
+        player_y = self.player_y * self.CELL_SIZE + self.CELL_SIZE // 2
+        pygame.draw.circle(screen, CYAN, (player_x, player_y), self.CELL_SIZE // 3)
         
-        instr = FONT_SMALL.render("DRŽÍ WSAD nebo ŠIPKY - Naviguj k cíli (zelený kruh)", True, WHITE)
+        instr = FONT_SMALL.render("DRŽÍ WSAD nebo ŠIPKY - Naviguj k cíli (zelený čtverec)", True, WHITE)
         screen.blit(instr, (20, SCREEN_HEIGHT - 50))
     
     def get_hint(self):
-        return "Pohybuj se WSAD/šipkami. Vyhni se zdím!"
+        return "Pohybuj se WSAD/šipkami. Najdi cestu!"
 
 class SimonSays(BaseGame):
     def __init__(self):
