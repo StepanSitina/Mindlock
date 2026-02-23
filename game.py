@@ -75,6 +75,7 @@ class Game:
         self.unlocked_levels = 1
         self.level_completed = False
         self.game_won = False
+        self.admin_mode = False
         self.show_hint = False
         self.hint_timer = 0
         self.pause_menu_open = False
@@ -424,18 +425,18 @@ class Game:
             BalanceGame(),
             RiddleGame(),
             SudokuLite(),
-            CaesarCipher(),
+            MemoryCards(),
             SwitchGame(),
-            WordUnscrambler(),
-            Maze(),
-            SimonSays(),
+            MathQuiz(),
+            SpeedClick(),
+            PatternFollow(),
+            NumberSort(),
+            ImageMatch(),
+            ReactionTime(),
+            Hangman(),
+            ColorBlind(),
             ButtonFinder(),
-            TetrisLite(),
-            Game2048(),
-            BalanceGame(),
-            RiddleGame(),
-            SudokuLite(),
-            WordUnscrambler()
+            MasterChallenge()
         ]
         return games[level_num - 1]
     
@@ -484,7 +485,11 @@ class Game:
             
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_o:
-                    self.unlocked_levels = 20
+                    self.admin_mode = not self.admin_mode
+                    if self.admin_mode:
+                        self.unlocked_levels = 20
+                    else:
+                        self.unlocked_levels = 1
                 if self.state == GameState.GAME:
                     if event.key == pygame.K_ESCAPE:
                         if not self.level_completed:
@@ -582,44 +587,41 @@ class BaseGame:
         return "Zkus tlačítko!"
 
 class Maze(BaseGame):
-    """Bludiště - pohyb WSAD nebo šipkami"""
+    """Bludiště s lepší strukturou - naviguj k cíli"""
     def __init__(self):
         super().__init__()
         self.player_x = 100
         self.player_y = 100
-        self.goal_x = 1100
-        self.goal_y = 700
+        self.goal_x = 1800
+        self.goal_y = 900
         self.walls = self.generate_maze()
-        self.player_size = 20
+        self.player_size = 15
         self.speed = 5
     
     def generate_maze(self):
-        """Generuje bludiště s více zdmi"""
+        """Generuje bludiště s klasickou strukturou"""
         walls = []
-        for x in range(0, SCREEN_WIDTH, 40):
-            walls.append(pygame.Rect(x, 0, 40, 30))
-            walls.append(pygame.Rect(x, SCREEN_HEIGHT - 30, 40, 30))
-        for y in range(0, SCREEN_HEIGHT, 40):
-            walls.append(pygame.Rect(0, y, 30, 40))
-            walls.append(pygame.Rect(SCREEN_WIDTH - 30, y, 30, 40))
         
-        internal_walls = [
-            pygame.Rect(300, 150, 400, 30),
-            pygame.Rect(600, 400, 300, 30),
-            pygame.Rect(200, 450, 200, 30),
-            pygame.Rect(800, 200, 30, 300),
-            pygame.Rect(400, 550, 400, 30),
-            pygame.Rect(150, 300, 30, 250),
-            pygame.Rect(500, 250, 300, 30),
-            pygame.Rect(900, 400, 30, 200),
-            pygame.Rect(350, 600, 250, 30),
-            pygame.Rect(700, 150, 30, 200),
-            pygame.Rect(200, 650, 300, 30),
-            pygame.Rect(1200, 300, 30, 350),
-            pygame.Rect(600, 600, 200, 30),
-            pygame.Rect(1000, 650, 200, 30),
+        walls.append(pygame.Rect(0, 0, SCREEN_WIDTH, 20))
+        walls.append(pygame.Rect(0, SCREEN_HEIGHT - 20, SCREEN_WIDTH, 20))
+        walls.append(pygame.Rect(0, 0, 20, SCREEN_HEIGHT))
+        walls.append(pygame.Rect(SCREEN_WIDTH - 20, 0, 20, SCREEN_HEIGHT))
+        
+        maze_pattern = [
+            pygame.Rect(300, 100, 20, 400),
+            pygame.Rect(600, 200, 20, 500),
+            pygame.Rect(900, 80, 20, 450),
+            pygame.Rect(1200, 300, 20, 400),
+            pygame.Rect(1500, 150, 20, 550),
+            pygame.Rect(200, 500, 400, 20),
+            pygame.Rect(500, 350, 400, 20),
+            pygame.Rect(750, 600, 450, 20),
+            pygame.Rect(1100, 200, 300, 20),
+            pygame.Rect(1350, 700, 400, 20),
+            pygame.Rect(400, 750, 500, 20),
+            pygame.Rect(1050, 550, 300, 20),
         ]
-        walls.extend(internal_walls)
+        walls.extend(maze_pattern)
         return walls
     
     def handle_event(self, event):
@@ -627,7 +629,6 @@ class Maze(BaseGame):
             self.move(event.key)
     
     def move(self, key):
-        """Pohyb pomocí kláves"""
         new_x, new_y = self.player_x, self.player_y
         
         if key in [pygame.K_w, pygame.K_UP]:
@@ -639,8 +640,7 @@ class Maze(BaseGame):
         elif key in [pygame.K_d, pygame.K_RIGHT]:
             new_x += self.speed
         
-        # Kontrola kolize se zdí
-        player_rect = pygame.Rect(new_x, new_y, self.player_size, self.player_size)
+        player_rect = pygame.Rect(new_x - self.player_size, new_y - self.player_size, self.player_size * 2, self.player_size * 2)
         collision = False
         for wall in self.walls:
             if player_rect.colliderect(wall):
@@ -651,32 +651,27 @@ class Maze(BaseGame):
             self.player_x = new_x
             self.player_y = new_y
         
-        # Kontrola cíle
-        if math.sqrt((self.player_x - self.goal_x)**2 + (self.player_y - self.goal_y)**2) < 30:
+        if math.sqrt((self.player_x - self.goal_x)**2 + (self.player_y - self.goal_y)**2) < 40:
             self.won = True
     
     def draw(self, screen):
         screen.fill(DARK_BLUE)
         
-        # Kreslení zdí
         for wall in self.walls:
             pygame.draw.rect(screen, GRAY, wall)
         
-        # Cíl
-        pygame.draw.circle(screen, GREEN, (self.goal_x, self.goal_y), 20)
-        goal_text = FONT_SMALL.render("CÍL", True, BLACK)
+        pygame.draw.circle(screen, GREEN, (self.goal_x, self.goal_y), 25)
+        goal_text = FONT_SMALL.render("CÍЛЬ", True, BLACK)
         goal_rect = goal_text.get_rect(center=(self.goal_x, self.goal_y))
         screen.blit(goal_text, goal_rect)
         
-        # Hráč
         pygame.draw.circle(screen, CYAN, (self.player_x, self.player_y), self.player_size)
         
-        # Instrukce
-        instr = FONT_SMALL.render("WSAD nebo ŠIPKY - Pohyb", True, WHITE)
+        instr = FONT_SMALL.render("WSAD nebo ŠIPKY - Naviguj k cíli (zelený kruh)", True, WHITE)
         screen.blit(instr, (20, SCREEN_HEIGHT - 50))
     
     def get_hint(self):
-        return "Vyhni se zdím, dosáhni zeleného cíle!"
+        return "Pohybuj se WSAD/šipkami. Vyhni se zdím!"
 
 class SimonSays(BaseGame):
     def __init__(self):
@@ -775,29 +770,35 @@ class SimonSays(BaseGame):
         return "Zapamatuj si pořadí barev!"
 
 class ButtonFinder(BaseGame):
-    """Najdi tlačítko - jednoduché"""
+    """Najdi tlačítko - logická hra"""
     def __init__(self):
         super().__init__()
         self.buttons = []
-        self.target_button = 0
+        self.target_label = "SPRÁVNÉ"
         self.create_buttons()
     
     def create_buttons(self):
-        """Vytvoří náhodná tlačítka"""
+        """Vytvoří tlačítka s popisem"""
         self.buttons = []
         self.target_button = random.randint(0, 8)
+        
+        labels = [
+            "KLIKNI", "FALEŠNÉ", "ŠPATNĚ", 
+            "NEEE", "SPRÁVNÉ", "NENE",
+            "JE TO", "TAM", "KLIPY"
+        ]
         
         for i in range(9):
             x = 150 + (i % 3) * 300
             y = 250 + (i // 3) * 150
-            self.buttons.append(pygame.Rect(x, y, 150, 100))
+            self.buttons.append({"rect": pygame.Rect(x, y, 150, 100), "label": labels[i]})
     
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN:
             pos = event.pos
             for i, btn in enumerate(self.buttons):
-                if btn.collidepoint(pos):
-                    if i == self.target_button:
+                if btn["rect"].collidepoint(pos):
+                    if btn["label"] == self.target_label:
                         self.won = True
                     else:
                         self.lost = True
@@ -808,19 +809,22 @@ class ButtonFinder(BaseGame):
         title = FONT_LARGE.render("NAJDI TLAČÍTKO", True, CYAN)
         screen.blit(title, (SCREEN_WIDTH//2 - 170, 30))
         
-        for i, btn in enumerate(self.buttons):
-            if i == self.target_button:
-                color = GREEN
-            else:
-                color = BLUE
-            pygame.draw.rect(screen, color, btn)
-            pygame.draw.rect(screen, WHITE, btn, 3)
+        target = FONT_MEDIUM.render(f"Hledej: {self.target_label}", True, YELLOW)
+        screen.blit(target, (SCREEN_WIDTH//2 - 150, 150))
         
-        instr = FONT_SMALL.render("Klikni na zelené tlačítko!", True, GREEN)
-        screen.blit(instr, (SCREEN_WIDTH//2 - 150, 700))
+        for i, btn in enumerate(self.buttons):
+            color = BLUE
+            pygame.draw.rect(screen, color, btn["rect"])
+            pygame.draw.rect(screen, WHITE, btn["rect"], 3)
+            
+            text = FONT_SMALL.render(btn["label"], True, BLACK)
+            screen.blit(text, (btn["rect"].x + 30, btn["rect"].y + 30))
+        
+        instr = FONT_SMALL.render("Klikni na tlačítko se správným popisem!", True, GREEN)
+        screen.blit(instr, (SCREEN_WIDTH//2 - 250, 700))
     
     def get_hint(self):
-        return "Zelené tlačítko se skrývá!"
+        return f"Hledáš tlačítko: {self.target_label}"
 
 class TetrisLite(BaseGame):
     """Lehký Tetris"""
@@ -1115,81 +1119,70 @@ class Game2048(BaseGame):
         return "Skládej stejná čísla, dosáhni 2048!"
 
 class BalanceGame(BaseGame):
-    """Hra s váhou - přesně půlka"""
+    """Hra s váhou - vyvážit předměty"""
     def __init__(self):
         super().__init__()
-        self.total_weight = random.randint(200, 400)
-        self.left_weight = 0
-        self.right_weight = 0
         self.items = [
-            {"name": "Jablko", "weight": 10},
-            {"name": "Kniha", "weight": 15},
-            {"name": "Cihla", "weight": 50},
-            {"name": "Pero", "weight": 5},
-            {"name": "Lyže", "weight": 25},
+            {"name": "ZLATÁ MISKA", "weight": 3},
+            {"name": "STŘÍBRNÁ MISKA", "weight": 2},
+            {"name": "STEN", "weight": 5},
+            {"name": "CIHLA", "weight": 4},
+            {"name": "KLÍČ", "weight": 1}
         ]
+        self.left_side = []
+        self.right_side = []
+        self.total_weight = sum(item["weight"] for item in self.items)
+        self.target_weight = self.total_weight // 2
         self.available_items = self.items.copy()
-        self.instruction = f"Dosáhni váhy {self.total_weight}g na obě strany!"
     
     def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            pos = event.pos
-            for i, item in enumerate(self.available_items):
-                x = 100 + i * 100
-                y = 300
-                if pygame.Rect(x, y, 80, 80).collidepoint(pos):
-                    if self.left_weight + item["weight"] <= self.total_weight:
-                        self.left_weight += item["weight"]
-                        self.available_items.remove(item)
-                    break
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_1 and self.available_items:
+                self.left_side.append(self.available_items.pop(0))
+            elif event.key == pygame.K_2 and self.available_items:
+                self.right_side.append(self.available_items.pop(0))
             
-            for i, item in enumerate(self.available_items):
-                x = 1000 - i * 100
-                y = 300
-                if pygame.Rect(x, y, 80, 80).collidepoint(pos):
-                    if self.right_weight + item["weight"] <= self.total_weight:
-                        self.right_weight += item["weight"]
-                        self.available_items.remove(item)
-                    break
-        
-        if self.left_weight == self.total_weight and self.right_weight == self.total_weight:
-            self.won = True
+            left_weight = sum(item["weight"] for item in self.left_side)
+            right_weight = sum(item["weight"] for item in self.right_side)
+            
+            if left_weight == right_weight and left_weight == self.target_weight:
+                self.won = True
     
     def draw(self, screen):
         screen.fill(DARK_BLUE)
         
-        title = FONT_LARGE.render("VÁŽKA", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH//2 - 100, 30))
+        title = FONT_LARGE.render("VYVAŽOVACÍ HRA", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 180, 30))
         
-        # Váha
-        pygame.draw.line(screen, WHITE, (SCREEN_WIDTH//2 - 200, 200), (SCREEN_WIDTH//2 + 200, 200), 5)
-        pygame.draw.circle(screen, WHITE, (SCREEN_WIDTH//2, 200), 10)
+        pygame.draw.circle(screen, YELLOW, (SCREEN_WIDTH//2, 250), 30)
+        pygame.draw.line(screen, WHITE, (SCREEN_WIDTH//2 - 250, 250), (SCREEN_WIDTH//2 + 250, 250), 3)
+        pygame.draw.rect(screen, BLUE, pygame.Rect(SCREEN_WIDTH//2 - 250, 200, 200, 80))
+        pygame.draw.rect(screen, BLUE, pygame.Rect(SCREEN_WIDTH//2 + 50, 200, 200, 80))
         
-        # Levá strana
-        left_text = FONT_MEDIUM.render(f"L: {self.left_weight}g", True, YELLOW if self.left_weight <= self.total_weight else RED)
-        screen.blit(left_text, (200, 200))
-        pygame.draw.rect(screen, BLUE, pygame.Rect(150, 250, 200, 150))
+        left_weight = sum(item["weight"] for item in self.left_side)
+        right_weight = sum(item["weight"] for item in self.right_side)
         
-        # Pravá strana
-        right_text = FONT_MEDIUM.render(f"P: {self.right_weight}g", True, YELLOW if self.right_weight <= self.total_weight else RED)
-        screen.blit(right_text, (SCREEN_WIDTH - 400, 200))
-        pygame.draw.rect(screen, BLUE, pygame.Rect(SCREEN_WIDTH - 350, 250, 200, 150))
+        left_text = FONT_MEDIUM.render(f"VLEVO: {left_weight}", True, WHITE)
+        right_text = FONT_MEDIUM.render(f"VPRAVO: {right_weight}", True, WHITE)
+        screen.blit(left_text, (SCREEN_WIDTH//2 - 240, 210))
+        screen.blit(right_text, (SCREEN_WIDTH//2 + 60, 210))
         
-        # Dostupné položky
+        y = 350
+        avail_text = FONT_SMALL.render("DOSTUPNÉ PŘEDMĚTY:", True, CYAN)
+        screen.blit(avail_text, (50, y))
+        y += 50
+        
         for i, item in enumerate(self.available_items):
-            x = 100 + i * 100
-            y = 450
-            pygame.draw.rect(screen, GREEN, pygame.Rect(x, y, 80, 80))
-            item_text = FONT_TINY.render(item["name"], True, BLACK)
-            weight_text = FONT_TINY.render(f"{item['weight']}g", True, BLACK)
-            screen.blit(item_text, (x + 10, y + 15))
-            screen.blit(weight_text, (x + 10, y + 45))
+            text = FONT_SMALL.render(f"{i+1}: {item['name']} ({item['weight']}kg)", True, WHITE)
+            screen.blit(text, (70, y))
+            y += 40
         
-        instr = FONT_SMALL.render(self.instruction, True, WHITE)
-        screen.blit(instr, (SCREEN_WIDTH//2 - 250, 600))
+        instr = FONT_SMALL.render("Stiskem 1 nebo 2 přidej předmět", True, YELLOW)
+        screen.blit(instr, (SCREEN_WIDTH//2 - 180, 700))
     
     def get_hint(self):
-        return f"Obě strany musí vážit {self.total_weight}g!"
+        target = self.total_weight // 2
+        return f"Vyváž obě strany na {target}kg"
 
 class RiddleGame(BaseGame):
     """Lehké hádanky"""
@@ -1309,60 +1302,74 @@ class SudokuLite(BaseGame):
         return "Každé číslo se smí vyskytovat jen jednou!"
 
 class CaesarCipher(BaseGame):
-    """Caesarova šifra"""
+    """Rychlá matematika - soutěž s časem"""
     def __init__(self):
         super().__init__()
-        self.words = [
-            {"encrypted": "KHOOR", "original": "AHOJ", "shift": 3},
-            {"encrypted": "ZRUOG", "original": "WORLD", "shift": 3},
-            {"encrypted": "KHOOR", "original": "AHOJ", "shift": 3},
-        ]
-        self.current = random.choice(self.words)
+        self.operations = ["+", "-", "*"]
+        self.correct_answers = 0
+        self.total_problems = 5
+        self.current_problem = self.generate_problem()
         self.answer = ""
-        self.alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        self.time_limit = 120
+        self.start_time = pygame.time.get_ticks() // 1000
+    
+    def generate_problem(self):
+        a = random.randint(1, 20)
+        b = random.randint(1, 20)
+        op = random.choice(self.operations)
+        
+        if op == "+":
+            result = a + b
+        elif op == "-":
+            result = a - b
+        else:
+            result = a * b
+        
+        return {"a": a, "b": b, "op": op, "result": result, "display": f"{a} {op} {b}"}
     
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_BACKSPACE:
                 self.answer = self.answer[:-1]
             elif event.key == pygame.K_RETURN:
-                if self.answer.upper() == self.current["original"]:
-                    self.won = True
-                else:
-                    self.lost = True
-            elif event.unicode.isalpha():
-                self.answer += event.unicode.upper()
+                try:
+                    if int(self.answer) == self.current_problem["result"]:
+                        self.correct_answers += 1
+                        if self.correct_answers >= self.total_problems:
+                            self.won = True
+                        else:
+                            self.current_problem = self.generate_problem()
+                            self.answer = ""
+                except:
+                    pass
+                self.answer = ""
+            elif event.unicode.isdigit() or (event.unicode == "-" and len(self.answer) == 0):
+                self.answer += event.unicode
     
     def draw(self, screen):
         screen.fill(DARK_BLUE)
         
-        title = FONT_LARGE.render("CAESAROVA ŠIFRA", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH//2 - 200, 30))
+        title = FONT_LARGE.render("RYCHLÁ MATEMATIKA", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 240, 30))
         
-        encrypted = FONT_LARGE.render(self.current["encrypted"], True, YELLOW)
-        encrypted_rect = encrypted.get_rect(center=(SCREEN_WIDTH//2, 150))
-        screen.blit(encrypted, encrypted_rect)
+        progress = FONT_MEDIUM.render(f"SPRÁVNĚ: {self.correct_answers}/{self.total_problems}", True, YELLOW)
+        screen.blit(progress, (SCREEN_WIDTH//2 - 180, 120))
         
-        # Abeceda
-        alpha_text = FONT_SMALL.render(self.alphabet, True, WHITE)
-        screen.blit(alpha_text, (100, 300))
+        problem = FONT_LARGE.render(self.current_problem["display"], True, WHITE)
+        problem_rect = problem.get_rect(center=(SCREEN_WIDTH//2, 250))
+        screen.blit(problem, problem_rect)
         
-        shifted = ""
-        for i in range(26):
-            shifted += self.alphabet[(i + self.current["shift"]) % 26]
-        shifted_text = FONT_SMALL.render(shifted, True, CYAN)
-        screen.blit(shifted_text, (100, 350))
-        
-        answer_text = FONT_MEDIUM.render(self.answer + "_", True, WHITE)
-        answer_rect = answer_text.get_rect(center=(SCREEN_WIDTH//2, 500))
-        pygame.draw.rect(screen, BLUE, pygame.Rect(answer_rect.x - 20, answer_rect.y - 20, answer_rect.width + 40, answer_rect.height + 40))
+        answer_text = FONT_LARGE.render(self.answer + "_", True, CYAN)
+        answer_rect = answer_text.get_rect(center=(SCREEN_WIDTH//2, 400))
+        pygame.draw.rect(screen, BLUE, pygame.Rect(answer_rect.x - 50, answer_rect.y - 30, answer_rect.width + 100, answer_rect.height + 60))
+        pygame.draw.rect(screen, CYAN, pygame.Rect(answer_rect.x - 50, answer_rect.y - 30, answer_rect.width + 100, answer_rect.height + 60), 3)
         screen.blit(answer_text, answer_rect)
         
-        instr = FONT_SMALL.render(f"Posun: {self.current['shift']} pozic | Napiš původní slovo", True, WHITE)
-        screen.blit(instr, (SCREEN_WIDTH//2 - 300, 600))
+        instr = FONT_SMALL.render("Napiš výsledek a stiskni ENTER", True, WHITE)
+        screen.blit(instr, (SCREEN_WIDTH//2 - 250, 600))
     
     def get_hint(self):
-        return f"Posun je {self.current['shift']}"
+        return f"Odpověď: {self.current_problem['result']}"
 
 class SwitchGame(BaseGame):
     """Logická hra s přepínači"""
@@ -1419,7 +1426,7 @@ class SwitchGame(BaseGame):
         return "Každé kliknutí změní stav sousedů!"
 
 class WordUnscrambler(BaseGame):
-    """Zamíchané slovo"""
+    """Zamíchané slovo - roztřída písmena správně"""
     def __init__(self):
         super().__init__()
         self.word_pairs = [
@@ -1440,96 +1447,538 @@ class WordUnscrambler(BaseGame):
             ("VÍTR", "RIVT"),
             ("OHEŇ", "HENÖ"),
             ("ZÁPAD", "PADÁZ"),
-            ("VÝCHOD", "CHYDOV"),
+            ("VÝCHOD", "CCHODV"),
             ("SEVER", "REVSÉ"),
-            ("SLANÝ", "NÁLYSA"),
+            ("SLANÝ", "NÁLSY"),
         ]
         
         self.current_pair = random.choice(self.word_pairs)
         self.original = self.current_pair[0]
         self.scrambled = list(self.current_pair[1])
-        self.answer_positions = [0] * len(self.scrambled)
-        self.selected = None
+        self.answer = [""] * len(self.original)
+        self.used = [False] * len(self.scrambled)
     
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN:
             pos = event.pos
-            # Klik na scrambled
-            for i in range(len(self.scrambled)):
-                x = 200 + i * 80
-                y = 300
-                if pygame.Rect(x, y, 60, 60).collidepoint(pos):
-                    self.selected = i
             
-            # Klik na řešení
-            for i in range(len(self.original)):
-                x = 200 + i * 80
-                y = 450
-                if pygame.Rect(x, y, 60, 60).collidepoint(pos) and self.selected is not None:
-                    self.answer_positions[self.selected] = i
-                    self.selected = None
-                    
-                    # Kontrola výhry
-                    current_word = ""
-                    for idx in range(len(self.scrambled)):
-                        current_word += self.scrambled[idx]
-                    
-                    if self.check_win():
-                        self.won = True
-        
-        elif event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_BACKSPACE and self.selected is not None:
-                self.answer_positions[self.selected] = 0
-                self.selected = None
+            for i in range(len(self.scrambled)):
+                if self.used[i]:
+                    continue
+                x = 100 + i * 90
+                y = 300
+                if pygame.Rect(x, y, 70, 70).collidepoint(pos):
+                    for j in range(len(self.answer)):
+                        if self.answer[j] == "":
+                            self.answer[j] = self.scrambled[i]
+                            self.used[i] = True
+                            self.check_win()
+                            return
     
     def check_win(self):
-        current_word = ""
-        for idx, char in enumerate(self.scrambled):
-            pos = self.answer_positions[idx]
-            current_word += char
-        
-        # Kontrola zda slovo odpovídá
-        current_arrangement = [None] * len(self.original)
-        for idx, char in enumerate(self.scrambled):
-            pos = self.answer_positions[idx]
-            if pos > 0:
-                current_arrangement[pos - 1] = char
-        
-        return ''.join(filter(None, current_arrangement)) == self.original
+        current = "".join(self.answer)
+        if current == self.original:
+            self.won = True
     
     def draw(self, screen):
         screen.fill(DARK_BLUE)
         
         title = FONT_LARGE.render("SEŘAĎ SLOVO", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH//2 - 140, 50))
+        screen.blit(title, (SCREEN_WIDTH//2 - 140, 30))
         
-        hint_text = FONT_SMALL.render(f"Slovo má {len(self.original)} písmen", True, YELLOW)
-        screen.blit(hint_text, (SCREEN_WIDTH//2 - 150, 150))
+        instr1 = FONT_SMALL.render("Klikejte postupně na písmena v pořadí", True, YELLOW)
+        screen.blit(instr1, (SCREEN_WIDTH//2 - 250, 120))
         
-        # Zamíchané písmena
+        for i in range(len(self.original)):
+            x = 100 + i * 90
+            y = 200
+            color = GREEN if self.answer[i] != "" else BLUE
+            pygame.draw.rect(screen, color, pygame.Rect(x, y, 70, 70))
+            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 70, 70), 2)
+            
+            if self.answer[i]:
+                char_text = FONT_MEDIUM.render(self.answer[i], True, BLACK)
+                char_rect = char_text.get_rect(center=(x + 35, y + 35))
+                screen.blit(char_text, char_rect)
+        
+        avail_text = FONT_SMALL.render("DOSTUPNÁ PÍSMENA:", True, CYAN)
+        screen.blit(avail_text, (100, 350))
+        
         for i, char in enumerate(self.scrambled):
-            x = 200 + i * 80
-            y = 300
-            color = CYAN if i == self.selected else BLUE
-            pygame.draw.rect(screen, color, pygame.Rect(x, y, 60, 60))
-            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 60, 60), 2)
+            if self.used[i]:
+                continue
+            x = 100 + i * 90
+            y = 420
+            pygame.draw.rect(screen, BLUE, pygame.Rect(x, y, 70, 70))
+            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 70, 70), 2)
             
             char_text = FONT_MEDIUM.render(char, True, BLACK)
-            char_rect = char_text.get_rect(center=(x + 30, y + 30))
+            char_rect = char_text.get_rect(center=(x + 35, y + 35))
             screen.blit(char_text, char_rect)
         
-        # Pole pro odpověď
-        for i in range(len(self.original)):
-            x = 200 + i * 80
-            y = 450
-            pygame.draw.rect(screen, GRAY, pygame.Rect(x, y, 60, 60))
-            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 60, 60), 2)
-        
-        instr = FONT_SMALL.render("Klikni na písmeno a pak na pozici", True, WHITE)
-        screen.blit(instr, (SCREEN_WIDTH//2 - 250, 650))
+        instr2 = FONT_SMALL.render("Slovo musí mít {} písmen".format(len(self.original)), True, WHITE)
+        screen.blit(instr2, (SCREEN_WIDTH//2 - 200, 700))
     
     def get_hint(self):
         return f"Správné slovo: {self.original}"
+
+
+class MemoryCards(BaseGame):
+    """Hra na paměť - otočit karty a najít páry"""
+    def __init__(self):
+        super().__init__()
+        self.symbols = ['🌟', '🎮', '🎨', '❤️'] 
+        self.cards = self.symbols + self.symbols
+        random.shuffle(self.cards)
+        self.revealed = [False] * 8
+        self.matched = [False] * 8
+        self.selected = []
+        self.matches = 0
+    
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and len(self.selected) < 2:
+            pos = event.pos
+            for i in range(8):
+                x = 300 + (i % 4) * 150
+                y = 300 + (i // 4) * 150
+                if pygame.Rect(x, y, 120, 120).collidepoint(pos):
+                    if not self.matched[i] and i not in self.selected:
+                        self.selected.append(i)
+                        self.revealed[i] = True
+                        if len(self.selected) == 2:
+                            if self.cards[self.selected[0]] == self.cards[self.selected[1]]:
+                                self.matched[self.selected[0]] = True
+                                self.matched[self.selected[1]] = True
+                                self.matches += 1
+                                self.selected = []
+                                if self.matches == 4:
+                                    self.won = True
+                            else:
+                                self.revealed[self.selected[0]] = False
+                                self.revealed[self.selected[1]] = False
+                                self.selected = []
+                        break
+    
+    def draw(self, screen):
+        screen.fill(DARK_BLUE)
+        title = FONT_LARGE.render("MEMORY KARTY", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 150, 50))
+        
+        for i in range(8):
+            x = 300 + (i % 4) * 150
+            y = 300 + (i // 4) * 150
+            color = GREEN if self.matched[i] else BLUE
+            pygame.draw.rect(screen, color, pygame.Rect(x, y, 120, 120))
+            if self.revealed[i]:
+                text = FONT_LARGE.render(self.cards[i], True, YELLOW)
+                screen.blit(text, (x + 30, y + 30))
+            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 120, 120), 3)
+        
+        info = FONT_SMALL.render(f"Páry: {self.matches}/4", True, WHITE)
+        screen.blit(info, (SCREEN_WIDTH//2 - 100, 700))
+    
+    def get_hint(self):
+        return "Zapamatuj si pozice karet!"
+
+
+class MathQuiz(BaseGame):
+    """Matematický kvíz"""
+    def __init__(self):
+        super().__init__()
+        self.num1 = random.randint(1, 20)
+        self.num2 = random.randint(1, 20)
+        self.operation = random.choice(['+', '-', '*'])
+        if self.operation == '+':
+            self.answer = self.num1 + self.num2
+        elif self.operation == '-':
+            self.answer = self.num1 - self.num2
+        else:
+            self.answer = self.num1 * self.num2
+        self.options = [self.answer, self.answer + random.randint(-10, 10), self.answer + random.randint(-10, 10)]
+        random.shuffle(self.options)
+        self.correct_index = self.options.index(self.answer)
+    
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            pos = event.pos
+            for i in range(3):
+                x = 200 + i * 400
+                y = 400
+                if pygame.Rect(x, y, 300, 100).collidepoint(pos):
+                    if i == self.correct_index:
+                        self.won = True
+                    else:
+                        self.lost = True
+    
+    def draw(self, screen):
+        screen.fill(DARK_BLUE)
+        title = FONT_LARGE.render("MATEMATIKA", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 150, 50))
+        
+        question = FONT_LARGE.render(f"{self.num1} {self.operation} {self.num2} = ?", True, YELLOW)
+        screen.blit(question, (SCREEN_WIDTH//2 - 200, 200))
+        
+        for i in range(3):
+            x = 200 + i * 400
+            y = 400
+            pygame.draw.rect(screen, BLUE, pygame.Rect(x, y, 300, 100))
+            text = FONT_MEDIUM.render(str(self.options[i]), True, WHITE)
+            screen.blit(text, (x + 100, y + 25))
+            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 300, 100), 3)
+    
+    def get_hint(self):
+        return f"Odpověď: {self.answer}"
+
+
+class SpeedClick(BaseGame):
+    """Klikej rychle na bílé čtverce"""
+    def __init__(self):
+        super().__init__()
+        self.targets = []
+        self.clicked = 0
+        self.timer = 0
+        self.generate_targets()
+    
+    def generate_targets(self):
+        self.targets = []
+        for _ in range(10):
+            x = random.randint(100, SCREEN_WIDTH - 100)
+            y = random.randint(200, SCREEN_HEIGHT - 200)
+            self.targets.append(pygame.Rect(x, y, 60, 60))
+    
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            pos = event.pos
+            for i, target in enumerate(self.targets):
+                if target.collidepoint(pos):
+                    self.targets.pop(i)
+                    self.clicked += 1
+                    if self.clicked == 10:
+                        self.won = True
+                    break
+    
+    def update(self):
+        self.timer += 1
+        if self.timer > 300:
+            self.lost = True
+    
+    def draw(self, screen):
+        screen.fill(DARK_BLUE)
+        title = FONT_LARGE.render("RYCHLE KLIKEJ!", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 180, 30))
+        
+        for target in self.targets:
+            pygame.draw.rect(screen, WHITE, target)
+            pygame.draw.rect(screen, CYAN, target, 3)
+        
+        info = FONT_MEDIUM.render(f"Kliknutí: {self.clicked}/10", True, YELLOW)
+        screen.blit(info, (SCREEN_WIDTH//2 - 150, 700))
+    
+    def get_hint(self):
+        return "Klikej na všechny čtverce!"
+
+
+class PatternFollow(BaseGame):
+    """Sleduj a opakuj barvu vzoru"""
+    def __init__(self):
+        super().__init__()
+        self.pattern = [random.randint(0, 3) for _ in range(5)]
+        self.player_pattern = []
+        self.showing = False
+        self.show_timer = 0
+        self.colors = [RED, YELLOW, GREEN, BLUE]
+    
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and not self.showing:
+            pos = event.pos
+            for i in range(4):
+                x = 300 + (i % 2) * 250
+                y = 300 + (i // 2) * 250
+                if pygame.Rect(x, y, 200, 200).collidepoint(pos):
+                    self.player_pattern.append(i)
+                    self.show_timer = 30
+                    self.check()
+                    break
+    
+    def check(self):
+        if self.player_pattern[-1] != self.pattern[len(self.player_pattern) - 1]:
+            self.lost = True
+        elif len(self.player_pattern) == len(self.pattern):
+            self.won = True
+    
+    def draw(self, screen):
+        screen.fill(DARK_BLUE)
+        title = FONT_LARGE.render("NÁSLEDUJ BARVY", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 150, 30))
+        
+        for i in range(4):
+            x = 300 + (i % 2) * 250
+            y = 300 + (i // 2) * 250
+            pygame.draw.rect(screen, self.colors[i], pygame.Rect(x, y, 200, 200))
+            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 200, 200), 3)
+        
+        info = FONT_SMALL.render(f"Krok {len(self.player_pattern)}/{len(self.pattern)}", True, WHITE)
+        screen.blit(info, (SCREEN_WIDTH//2 - 150, 700))
+    
+    def get_hint(self):
+        return f"Pamatuj: {len(self.pattern)} barev"
+
+
+class NumberSort(BaseGame):
+    """Seřaď čísla od nejmenšího k největšímu"""
+    def __init__(self):
+        super().__init__()
+        self.numbers = random.sample(range(1, 101), 5)
+        self.player_order = []
+        self.sorted_correct = sorted(self.numbers)
+    
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            pos = event.pos
+            for i, num in enumerate(self.numbers):
+                x = 250 + i * 250
+                y = 400
+                if pygame.Rect(x, y, 150, 100).collidepoint(pos):
+                    if num not in self.player_order:
+                        self.player_order.append(num)
+                        if self.player_order == self.sorted_correct:
+                            self.won = True
+                    break
+    
+    def draw(self, screen):
+        screen.fill(DARK_BLUE)
+        title = FONT_LARGE.render("SEŘAĎ ČÍSLA", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 150, 30))
+        
+        for i, num in enumerate(self.numbers):
+            x = 250 + i * 250
+            y = 400
+            pygame.draw.rect(screen, BLUE, pygame.Rect(x, y, 150, 100))
+            text = FONT_LARGE.render(str(num), True, WHITE)
+            screen.blit(text, (x + 40, y + 20))
+            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 150, 100), 3)
+        
+        result = " < ".join(str(n) for n in self.player_order) if self.player_order else "?"
+        result_text = FONT_SMALL.render(f"Tvůj výběr: {result}", True, YELLOW)
+        screen.blit(result_text, (SCREEN_WIDTH//2 - 300, 650))
+    
+    def get_hint(self):
+        return f"Správné pořadí: {' < '.join(str(n) for n in self.sorted_correct)}"
+
+
+class ImageMatch(BaseGame):
+    """Kombinuj stejné obrázky"""
+    def __init__(self):
+        super().__init__()
+        self.symbols = ['🔥', '💧', '🌪️', '⚡', '🎯', '💎']
+        self.pairs = []
+        for sym in self.symbols:
+            self.pairs.extend([sym, sym])
+        random.shuffle(self.pairs)
+        self.matched = [False] * 12
+        self.selected = []
+        self.matches = 0
+    
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and len(self.selected) < 2:
+            pos = event.pos
+            for i in range(12):
+                x = 200 + (i % 6) * 200
+                y = 300 + (i // 6) * 200
+                if pygame.Rect(x, y, 150, 150).collidepoint(pos):
+                    if not self.matched[i] and i not in self.selected:
+                        self.selected.append(i)
+                        if len(self.selected) == 2:
+                            if self.pairs[self.selected[0]] == self.pairs[self.selected[1]]:
+                                self.matched[self.selected[0]] = True
+                                self.matched[self.selected[1]] = True
+                                self.matches += 1
+                                if self.matches == 6:
+                                    self.won = True
+                            self.selected = []
+                        break
+    
+    def draw(self, screen):
+        screen.fill(DARK_BLUE)
+        title = FONT_LARGE.render("KOMBINUJ OBRÁZKY", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 200, 30))
+        
+        for i in range(12):
+            x = 200 + (i % 6) * 200
+            y = 300 + (i // 6) * 200
+            color = GREEN if self.matched[i] else BLUE
+            pygame.draw.rect(screen, color, pygame.Rect(x, y, 150, 150))
+            if self.matched[i]:
+                text = FONT_LARGE.render(self.pairs[i], True, YELLOW)
+                screen.blit(text, (x + 50, y + 50))
+            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 150, 150), 3)
+        
+        info = FONT_SMALL.render(f"Páry: {self.matches}/6", True, WHITE)
+        screen.blit(info, (SCREEN_WIDTH//2 - 100, 700))
+    
+    def get_hint(self):
+        return "Najdi stejné obrázky!"
+
+
+class ReactionTime(BaseGame):
+    """Test reflexu - klikni když změní barvu"""
+    def __init__(self):
+        super().__init__()
+        self.timer = 0
+        self.show_target = False
+        self.start_time = 0
+        self.reaction_time = 0
+    
+    def update(self):
+        self.timer += 1
+        if self.timer == random.randint(60, 300):
+            self.show_target = True
+            self.start_time = self.timer
+    
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and self.show_target:
+            self.reaction_time = self.timer - self.start_time
+            if self.reaction_time < 100:
+                self.won = True
+            else:
+                self.lost = True
+    
+    def draw(self, screen):
+        screen.fill(DARK_BLUE)
+        title = FONT_LARGE.render("REFLEX TEST", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 150, 50))
+        
+        box_color = GREEN if self.show_target else RED
+        pygame.draw.rect(screen, box_color, pygame.Rect(600, 300, 600, 400))
+        
+        if self.show_target:
+            text = FONT_LARGE.render("KLIKNI!", True, YELLOW)
+            screen.blit(text, (SCREEN_WIDTH//2 - 100, 450))
+        else:
+            text = FONT_MEDIUM.render("Čekej na barvu...", True, WHITE)
+            screen.blit(text, (SCREEN_WIDTH//2 - 200, 450))
+    
+    def get_hint(self):
+        return "Klikni co nejrychleji!"
+
+
+class Hangman(BaseGame):
+    """Hádat slovo - Oběšenec"""
+    def __init__(self):
+        super().__init__()
+        self.words = ["PYTHON", "PROGRAM", "VIDEHRA", "LOGIKA", "PUZZLE"]
+        self.word = random.choice(self.words)
+        self.guessed = set()
+        self.wrong = 0
+        self.max_wrong = 6
+    
+    def handle_event(self, event):
+        if event.type == pygame.KEYDOWN:
+            if event.unicode.isalpha():
+                letter = event.unicode.upper()
+                if letter not in self.guessed:
+                    self.guessed.add(letter)
+                    if letter not in self.word:
+                        self.wrong += 1
+                    
+                    if all(l in self.guessed for l in self.word):
+                        self.won = True
+                    if self.wrong >= self.max_wrong:
+                        self.lost = True
+    
+    def draw(self, screen):
+        screen.fill(DARK_BLUE)
+        title = FONT_LARGE.render("OBĚŠENEC", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 150, 30))
+        
+        word_display = " ".join(l if l in self.guessed else "_" for l in self.word)
+        word_text = FONT_LARGE.render(word_display, True, YELLOW)
+        screen.blit(word_text, (SCREEN_WIDTH//2 - 200, 200))
+        
+        guessed_text = FONT_SMALL.render(f"Hádaná písmena: {' '.join(sorted(self.guessed))}", True, WHITE)
+        screen.blit(guessed_text, (SCREEN_WIDTH//2 - 300, 350))
+        
+        wrong_text = FONT_MEDIUM.render(f"Chyby: {self.wrong}/{self.max_wrong}", True, RED)
+        screen.blit(wrong_text, (SCREEN_WIDTH//2 - 150, 500))
+    
+    def get_hint(self):
+        return f"Slovo: {self.word}"
+
+
+class ColorBlind(BaseGame):
+    """Najdi jinou barvu"""
+    def __init__(self):
+        super().__init__()
+        self.base_color = random.choice([RED, BLUE, YELLOW, GREEN])
+        self.different_color = [RED, BLUE, YELLOW, GREEN]
+        self.different_color.remove(self.base_color)
+        self.different_color = random.choice(self.different_color)
+        self.positions = list(range(16))
+        self.different_pos = random.randint(0, 15)
+        random.shuffle(self.positions)
+    
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            pos = event.pos
+            for i in range(16):
+                x = 300 + (i % 4) * 200
+                y = 250 + (i // 4) * 200
+                if pygame.Rect(x, y, 150, 150).collidepoint(pos):
+                    if self.positions[i] == self.different_pos:
+                        self.won = True
+                    else:
+                        self.lost = True
+                    break
+    
+    def draw(self, screen):
+        screen.fill(DARK_BLUE)
+        title = FONT_LARGE.render("NAJDI ROZDÍL", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 150, 30))
+        
+        for i in range(16):
+            x = 300 + (i % 4) * 200
+            y = 250 + (i // 4) * 200
+            color = self.different_color if self.positions[i] == self.different_pos else self.base_color
+            pygame.draw.rect(screen, color, pygame.Rect(x, y, 150, 150))
+            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 150, 150), 2)
+    
+    def get_hint(self):
+        return "Najdi barvu která se liší!"
+
+
+class MasterChallenge(BaseGame):
+    """Finální výzva - kombinace všeho"""
+    def __init__(self):
+        super().__init__()
+        self.challenges = [
+            {"type": "math", "data": {"num1": 25, "num2": 7, "op": "*", "ans": 175}},
+            {"type": "memory", "data": {"sequence": [1, 3, 0, 2, 1]}},
+            {"type": "speed", "data": {}},
+        ]
+        self.current = 0
+        self.completed = 0
+    
+    def handle_event(self, event):
+        if event.type == pygame.KEYDOWN:
+            if self.current == 0:
+                if event.unicode.isdigit():
+                    self.completed += 1
+                    if self.completed >= 3:
+                        self.won = True
+    
+    def draw(self, screen):
+        screen.fill(DARK_BLUE)
+        title = FONT_LARGE.render("FINÁLNÍ VÝZVA", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH//2 - 180, 50))
+        
+        challenge_text = FONT_MEDIUM.render(f"Vyzva {self.current + 1}/3", True, YELLOW)
+        screen.blit(challenge_text, (SCREEN_WIDTH//2 - 150, 250))
+        
+        instruction = FONT_SMALL.render("Dokončil(a) jsi základní úkoly!", True, GREEN if self.completed > 0 else WHITE)
+        screen.blit(instruction, (SCREEN_WIDTH//2 - 250, 450))
+    
+    def get_hint(self):
+        return "Dej to všechno dohromady!"
 
 
 if __name__ == "__main__":

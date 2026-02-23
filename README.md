@@ -1,43 +1,43 @@
-# MindLock! - Puzzle Game
+# MindLock! - Puzzle Hra
 
-A Python-based puzzle game featuring 11 unique mini-games with progressive difficulty. Challenge your memory, logic, and problem-solving skills!
+Pythonová puzzle hra s 11 jedinečnými mini-hrami s postupující obtížností. Vyzkoušej svou paměť, logiku a schopnost řešit problémy!
 
-## Features
+## Vlastnosti
 
-### 11 Unique Game Modes
-- **Simon Says** - Remember and replay color sequences (5 rounds to win)
-- **Maze** - Navigate through a complex labyrinth to reach the goal
-- **Button Finder** - Identify the correct button among 9 options
-- **Tetris Lite** - Clear 3 lines in this simplified Tetris version
-- **2048** - Combine tiles to create the 2048 tile
-- **Balance Game** - Distribute items equally on both sides
-- **Riddle Game** - Solve Czech riddles to progress
-- **Sudoku Lite** - Complete 4x4 Sudoku puzzles
-- **Caesar Cipher** - Decrypt messages using shift ciphers
-- **Switch Game** - Activate all switches with chain reactions
-- **Word Unscrambler** - Rearrange letters to form words
+### 11 Unikátních Her
+- **Simon Says** - Zapamatuj si a opakuj posloupnosti barev (5 kol k výhře)
+- **Bludiště** - Projdi komplexním bludištěm a dosáhni cíle
+- **Hledač Tlačítka** - Najdi správné tlačítko z 9 možností
+- **Tetris Lite** - Vymaž 3 řady v zjednodušené verzi Tetrisu
+- **2048** - Kombinuj dlaždice a vytvoř dlaždici 2048
+- **Vážka** - Rozděl předměty stejně na obě strany
+- **Hádanka** - Řeš české hádanky pro postup
+- **Sudoku Lite** - Vyplň 4x4 Sudoku
+- **Caesarova Šifra** - Dešifruj zprávy pomocí posunů
+- **Přepínače** - Aktivuj všechny přepínače s řetězovými reakcemi
+- **Unscrambler Slov** - Uspořádej písmena do slov
 
-## Controls
+## Ovládání
 
-### In-Game
-- **H** - Display hint popup (with context-specific help)
-- **ESC** - Open pause menu
-  - Continue - Resume game
-  - Restart - Restart level and unlock level 2
-  - Exit - Return to level selection
-- **WSAD / Arrow Keys** - Move (in games that require movement)
-- **Mouse/Click** - Interact with buttons and UI elements
+### Během Hry
+- **H** - Zobraz popup nápovědu (kontextně závislá pomoc)
+- **ESC** - Otevři menu pauzy
+  - Pokračovat - Vrátit se do hry
+  - Restart - Restartovat level a odemknout level 2
+  - Výstup - Vrátit se na výběr levelů
+- **WSAD / Šipky** - Pohyb (v hrách vyžadujících pohyb)
+- **Myš/Klik** - Interakce s tlačítky a UI
 
-### Secret Features
-- **O** - Unlock all 20 levels (admin mode - hidden feature!)
+### Tajné Funkce
+- **O** - Odemkni všech 20 levelů (admin mód - skrytá funkce!)
 
-## GamePlay
+## Hrání
 
-- 20 progressively difficult levels
-- Unlock levels by completing previous ones
-- Hint system to help when stuck
-- Pause functionality for all games
-- Win/loss conditions with popup menus
+- 20 postupně obtížnějších levelů
+- Odemykej levely splněním předchozích
+- Systém nápověd pro pomoc když se zaseknete
+- Funkce pauzy pro všechny hry
+- Popup menu pro výhru/prohru
 
 ## Patch Notes
 
@@ -59,27 +59,27 @@ A Python-based puzzle game featuring 11 unique mini-games with progressive diffi
 - Odstraněny všechny komentáře ze kódu
 - Opraveny chyby v souboru
 
-### Version 1.2.0
+### Verze 1.2.0
 - Hezčí a moderní menu
 - Opravena logika 2048
 - Přidán delay v Simon Says
 - Patch notes nyní v Pop-up okně
 
-### Version 1.1.0
+### Verze 1.1.0
 - Opravena mechanika levelů
 - Přidány nápovědy
 
-### Version 1.0.0
+### Verze 1.0.0
 - Počáteční verze hry
 - 11 různých herních módů
 
-## Installation
+## Instalace
 
-### Requirements
+### Požadavky
 - Python 3.10+
 - pygame-ce (Community Edition)
 
-### Setup
+### Nastavení
 ```bash
 pip install pygame-ce
 git clone https://github.com/StepanSitina/Mindlock.git
@@ -87,17 +87,17 @@ cd Mindlock
 python game.py
 ```
 
-## Game Settings
+## Herní Nastavení
 
-Access settings from the main menu:
-- **Graphics Settings** - Adjust FPS (10-240)
-- **Developer Info** - View version and game statistics
+Přístup k nastavením z hlavního menu:
+- **Nastavení Grafiky** - Úprava FPS (10-240)
+- **Info Vývojáře** - Zobrazení verze a statistik hry
 
-## Author
-Created by Stepan Sitina
+## Autor
+Vytvořil: Stepan Sitina
 
-## License
-Private project
+## Licence
+Soukromý projekt
 
-## Enjoy!
-Challenge your brain with MindLock! and see how far you can progress!
+## Užij si to!
+Vyzkoušej si MindLock! a podívej se, jak daleko můžeš dojít!
