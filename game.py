@@ -77,12 +77,15 @@ class Game:
         self.game_won = False
         self.show_hint = False
         self.hint_timer = 0
+        self.pause_menu_open = False
+        self.show_hint_popup = False
+        self.hint_popup_timer = 0
         
 
         self.patch_notes = [
             {"version": "1.0.0", "notes": ["Počáteční verze hry", "11 různých herních módů"]},
             {"version": "1.1.0", "notes": ["Opravena mechanika levelů", "Přidány nápovědy"]},
-            {"version": "1.2.0", "notes": ["Hezčí a moderní menu", "Opravena logika 2048", "Přidán delay v Simon Says", "Patch notes nyní v krabici"]}
+            {"version": "1.2.0", "notes": ["Hezčí a moderní menu", "Opravena logika 2048", "Přidán delay v Simon Says", "Patch notes nyní v Pop-up okně"]}
         ]
         
         self.version = self.patch_notes[-1]["version"]
@@ -128,6 +131,11 @@ class Game:
             "next": Button(SCREEN_WIDTH//2 + 150, 400, 150, 60, "DALŠÍ")
         }
         
+        self.pause_buttons = {
+            "continue": Button(SCREEN_WIDTH//2 - 100, 350, 200, 60, "CONTINUE"),
+            "restart": Button(SCREEN_WIDTH//2 - 100, 450, 200, 60, "RESTART"),
+            "exit": Button(SCREEN_WIDTH//2 - 100, 550, 200, 60, "EXIT")
+        }
 
         self.current_game = None
         
@@ -290,6 +298,45 @@ class Game:
             final_text = FONT_SMALL.render("CONGRATULATIONS - WINNER!", True, YELLOW)
             self.screen.blit(final_text, (SCREEN_WIDTH//2 - 200, 500))
     
+    def draw_pause_menu(self):
+        """Kreslí pause menu"""
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        overlay.set_alpha(200)
+        overlay.fill(BLACK)
+        self.screen.blit(overlay, (0, 0))
+        
+        title = FONT_LARGE.render("PAUSE", True, YELLOW)
+        title_rect = title.get_rect(center=(SCREEN_WIDTH//2, 200))
+        self.screen.blit(title, title_rect)
+        
+        self.pause_buttons["continue"].draw(self.screen)
+        self.pause_buttons["restart"].draw(self.screen)
+        self.pause_buttons["exit"].draw(self.screen)
+    
+    def draw_hint_popup(self):
+        """Kreslí hint popup"""
+        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        overlay.set_alpha(180)
+        overlay.fill(BLACK)
+        self.screen.blit(overlay, (0, 0))
+        
+        hint_title = FONT_LARGE.render("NAPOVEDA", True, YELLOW)
+        hint_title_rect = hint_title.get_rect(center=(SCREEN_WIDTH//2, 300))
+        self.screen.blit(hint_title, hint_title_rect)
+        
+        hint = self.current_game.get_hint()
+        hint_text = FONT_MEDIUM.render(hint, True, GREEN)
+        hint_rect = hint_text.get_rect(center=(SCREEN_WIDTH//2, 450))
+        
+        box_rect = pygame.Rect(hint_rect.x - 40, hint_rect.y - 20, hint_rect.width + 80, hint_rect.height + 40)
+        pygame.draw.rect(self.screen, BLUE, box_rect)
+        pygame.draw.rect(self.screen, CYAN, box_rect, 3)
+        self.screen.blit(hint_text, hint_rect)
+        
+        close_text = FONT_SMALL.render("Klikni kdekoliv pro zavreni", True, WHITE)
+        close_rect = close_text.get_rect(center=(SCREEN_WIDTH//2, 600))
+        self.screen.blit(close_text, close_rect)
+    
     def handle_menu_click(self, pos):
         """Zpracuje klik v menu"""
         if self.menu_buttons["play"].is_clicked(pos):
@@ -348,6 +395,21 @@ class Game:
                 self.level_completed = False
                 self.game_won = False
     
+    def handle_pause_click(self, pos):
+        """Zpracuje klik v pause menu"""
+        if self.pause_buttons["continue"].is_clicked(pos):
+            self.pause_menu_open = False
+        elif self.pause_buttons["restart"].is_clicked(pos):
+            self.unlocked_levels = max(self.unlocked_levels, 2)
+            self.current_level = 2
+            self.current_game = self.create_game_level(2)
+            self.level_completed = False
+            self.game_won = False
+            self.pause_menu_open = False
+        elif self.pause_buttons["exit"].is_clicked(pos):
+            self.state = GameState.PLAYING
+            self.pause_menu_open = False
+    
     def create_game_level(self, level_num):
         """Vytvoří hru pro daný level"""
         games = [
@@ -395,6 +457,8 @@ class Game:
                     button.is_hovered(mouse_pos)
                 for button in self.popup_buttons.values():
                     button.is_hovered(mouse_pos)
+                for button in self.pause_buttons.values():
+                    button.is_hovered(mouse_pos)
             
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if self.state == GameState.MENU:
@@ -406,21 +470,29 @@ class Game:
                 elif self.state == GameState.PLAYING:
                     self.handle_play_click(mouse_pos)
                 elif self.state == GameState.GAME:
-                    if self.level_completed:
+                    if self.show_hint_popup:
+                        self.show_hint_popup = False
+                    elif self.pause_menu_open:
+                        self.handle_pause_click(mouse_pos)
+                    elif self.level_completed:
                         self.handle_popup_click(mouse_pos)
                     elif self.current_game:
                         self.current_game.handle_event(event)
             
             elif event.type == pygame.KEYDOWN:
-                if self.state == GameState.GAME and not self.level_completed:
-                    self.current_game.handle_event(event)
-                    if event.key == pygame.K_h:
-                        self.show_hint = True
-                        self.hint_timer = 300
+                if self.state == GameState.GAME:
+                    if event.key == pygame.K_ESCAPE:
+                        if not self.level_completed:
+                            self.pause_menu_open = not self.pause_menu_open
+                    elif not self.level_completed and not self.pause_menu_open:
+                        self.current_game.handle_event(event)
+                        if event.key == pygame.K_h:
+                            self.show_hint_popup = True
+                            self.hint_popup_timer = 400
     
     def update(self):
         """Aktualizuje stav hry"""
-        if self.state == GameState.GAME and not self.level_completed and self.current_game:
+        if self.state == GameState.GAME and not self.level_completed and self.current_game and not self.pause_menu_open:
             self.current_game.update()
             if self.current_game.is_won():
                 self.level_completed = True
@@ -431,10 +503,10 @@ class Game:
                 self.level_completed = True
                 self.game_won = False
         
-        if self.hint_timer > 0:
-            self.hint_timer -= 1
+        if self.hint_popup_timer > 0:
+            self.hint_popup_timer -= 1
         else:
-            self.show_hint = False
+            self.show_hint_popup = False
     
     def draw(self):
         """Kreslí vše na obrazovku"""
@@ -450,19 +522,17 @@ class Game:
             if self.current_game:
                 self.current_game.draw(self.screen)
                 
-                # Nápověda
-                hint_text = FONT_TINY.render("Nápověda: Stiskni H", True, YELLOW)
+                hint_text = FONT_TINY.render("Napoveda: Stiskni H | ESC: Menu", True, YELLOW)
                 self.screen.blit(hint_text, (10, 10))
                 
-                if self.show_hint:
-                    hint = self.current_game.get_hint()
-                    hint_surface = FONT_SMALL.render(f"NÁPOVĚDA: {hint}", True, GREEN)
-                    hint_rect = hint_surface.get_rect(center=(SCREEN_WIDTH//2, 50))
-                    self.screen.blit(hint_surface, hint_rect)
-                
-                # Level info
                 level_text = FONT_SMALL.render(f"Level: {self.current_level}/20", True, WHITE)
                 self.screen.blit(level_text, (SCREEN_WIDTH - 200, 10))
+                
+                if self.show_hint_popup:
+                    self.draw_hint_popup()
+                
+                if self.pause_menu_open:
+                    self.draw_pause_menu()
                 
                 if self.level_completed:
                     self.draw_popup_menu()
