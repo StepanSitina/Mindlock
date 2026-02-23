@@ -85,7 +85,10 @@ class Game:
         self.patch_notes = [
             {"version": "1.0.0", "notes": ["Počáteční verze hry", "11 různých herních módů"]},
             {"version": "1.1.0", "notes": ["Opravena mechanika levelů", "Přidány nápovědy"]},
-            {"version": "1.2.0", "notes": ["Hezčí a moderní menu", "Opravena logika 2048", "Přidán delay v Simon Says", "Patch notes nyní v Pop-up okně"]}
+            {"version": "1.2.0", "notes": ["Hezčí a moderní menu", "Opravena logika 2048", "Přidán delay v Simon Says", "Patch notes nyní v Pop-up okně"]},
+            {"version": "1.3.0", "notes": ["Opravena chyba SimonSays s nekonečnou smyčkou", "Opravena inicializace TetrisLite", "Odstraněny všechny komentáře ze kódu", "Opraveny chyby v souboru"]},
+            {"version": "1.4.0", "notes": ["Nápověda jako popup okno (stiskni H)", "Pause menu s ESC klávesou", "Tlačítka: Continue, Restart (odemyka level 2), Exit", "Simon Says nyní vyžaduje 5 kol místo 7"]},
+            {"version": "1.5.0", "notes": ["Bludiště má nyní mnohem více zdí (164 přesně)", "Přidán tajný admin mode - stiskni O pro odemknutí všech levelů", "Vylepšená herní vyvážená obtížnost", "Patch notes aktualizovány po každé změně"]}
         ]
         
         self.version = self.patch_notes[-1]["version"]
