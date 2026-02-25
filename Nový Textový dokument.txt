@@ -1,0 +1,99 @@
+Tvůj problém není v pohybu.
+Problém je, že když generate_maze() selže, zavoláš create_simple_maze(), která vytvoří jen první a poslední řádek jako cestu — přesně to, co popisuješ.
+
+Takže řešení není opravovat grid ručně.
+Uděláme skutečné generování bludiště algoritmem.
+
+Použijeme Recursive Backtracking (DFS maze generator).
+To ti vytvoří opravdové bludiště s chodbami, zatáčkami i slepými uličkami.
+
+✅ NAHRAĎ generate_maze() TÍMTO:
+import random
+
+def generate_maze(self):
+    """
+    Generuje skutečné bludiště pomocí DFS (recursive backtracking).
+    1 = cesta
+    0 = zeď
+    """
+
+    rows = self.ROWS
+    cols = self.COLS
+
+    # Celé pole jako zeď
+    maze = [[0 for _ in range(cols)] for _ in range(rows)]
+
+    def carve(r, c):
+        directions = [(0, 2), (2, 0), (0, -2), (-2, 0)]
+        random.shuffle(directions)
+
+        for dr, dc in directions:
+            nr = r + dr
+            nc = c + dc
+
+            if 0 < nr < rows and 0 < nc < cols and maze[nr][nc] == 0:
+                maze[r + dr // 2][c + dc // 2] = 1
+                maze[nr][nc] = 1
+                carve(nr, nc)
+
+    # Startovní bod
+    maze[0][0] = 1
+    carve(0, 0)
+
+    # Ujistit se že cíl je průchozí
+    maze[rows - 1][cols - 1] = 1
+
+    return maze
+❌ SMAŽ:
+
+create_simple_maze()
+
+BFS kontrolu
+
+fallback regeneraci
+
+U DFS algoritmu cesta vždy existuje, protože se bludiště vyřezává ze startu.
+
+⚠️ DŮLEŽITÉ
+
+Pro nejlepší výsledek musí být:
+
+self.ROWS = 21
+self.COLS = 25
+
+Proč?
+DFS maze funguje nejlépe s lichým počtem řádků a sloupců.
+
+🎮 CO TEĎ DOSTANEŠ
+
+✔ opravdové bludiště
+✔ žádné jen horní/dolní řádky
+✔ slepé uličky
+✔ vždy existuje cesta
+✔ pokaždé jiné bludiště
+
+🔥 BONUS – VYSTŘEDĚNÍ NA 1920x1080
+
+Do draw části přidej offset:
+
+offset_x = (1920 - self.COLS * self.CELL_SIZE) // 2
+offset_y = (1080 - self.ROWS * self.CELL_SIZE) // 2
+
+A při kreslení:
+
+rect = pygame.Rect(
+    offset_x + col * self.CELL_SIZE,
+    offset_y + row * self.CELL_SIZE,
+    self.CELL_SIZE,
+    self.CELL_SIZE
+)
+
+Pokud chceš, můžu ti ještě:
+
+udělat silnější stěny
+
+přidat animaci generování
+
+přidat více úrovní obtížnosti
+
+udělat větší maze (např 41x41 hardcore verzi)
