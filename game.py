@@ -3,13 +3,18 @@ import sys
 import random
 import math
 from enum import Enum
-from collections import defaultdict
+from collections import defaultdict, deque
 
 
 pygame.init()
 
 
-SCREEN_WIDTH = 1920
+# =====================================
+# VERSION SYSTEM FIX
+# =====================================
+GAME_VERSION = "1.7.0"
+
+SCREEN_WIDTH = 1924
 SCREEN_HEIGHT = 1080
 FPS = 60
 FONT_LARGE = pygame.font.Font(None, 80)
@@ -65,7 +70,11 @@ class Button:
 
 class Game:
     def __init__(self):
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        # Načti počáteční rozlišení
+        self.screen_width = 1920
+        self.screen_height = 1080
+        
+        self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
         pygame.display.set_caption("MindLock! - Puzzle Game")
         self.clock = pygame.time.Clock()
         self.running = True
@@ -87,37 +96,89 @@ class Game:
         self.space_press_timer = 0
         self.current_game = None
         
+        # =====================================
+        # GRAPHICS MENU EXPANSION - Settings Structure
+        # =====================================
+        self.graphics_settings = {
+            "resolution": "1920x1080",  # Current resolution
+            "fullscreen": False,
+            "vsync": True,
+            "ui_scale": 100,  # Percentage: 100, 125, 150
+            "particles": True,
+            "screen_shake": True
+        }
+        
+        # Available resolutions for cycling
+        self.available_resolutions = [
+            "1280x720",
+            "1600x900",
+            "1920x1080"
+        ]
+        
+        # Available UI scale options
+        self.available_ui_scales = [100, 125, 150]
+        
+        # Inicializuj všechna tlačítka
+        self.initialize_ui_elements()
 
         self.patch_notes = [
             {"version": "1.0.0", "notes": ["Počáteční verze hry", "11 různých herních módů"]},
             {"version": "1.1.0", "notes": ["Opravena mechanika levelů", "Přidány nápovědy"]},
-            {"version": "1.2.0", "notes": ["Hezčí a moderní menu", "Opravena logika 2048", "Přidán delay v Simon Says", "Patch notes nyní v Pop-up okně"]},
+            {"version": "1.7.0", "notes": ["Hezčí a moderní menu", "Opravena logika 2048", "Přidán delay v Simon Says", "Patch notes nyní v Pop-up okně"]},
             {"version": "1.3.0", "notes": ["Opravena chyba SimonSays s nekonečnou smyčkou", "Opravena inicializace TetrisLite", "Odstraněny všechny komentáře ze kódu", "Opraveny chyby v souboru"]},
             {"version": "1.4.0", "notes": ["Nápověda jako popup okno (stiskni N)", "Pause menu s ESC klávesou", "Tlačítka: Continue, Restart (odemyka level 2), Exit", "Simon Says nyní vyžaduje 5 kol místo 7"]},
             {"version": "1.5.0", "notes": ["Bludiště má nyní mnohem více zdí", "Přidán tajný admin mode", "Vylepšená herní vyvážená obtížnost", "Patch notes aktualizovány po každé změně"]},
             {"version": "1.6.0", "notes": ["Bludiště s DFS algoritmem - překrásné", "Coming Soon popup pro hotové levely", "Nápověda přesunuta na N klávesu", "Maze hra zcela přepracována"]},
-            {"version": "1.7.0", "notes": ["Nápověda změněna na SPACE SPACE (2x stisk)", "Opraveny chyby v inicializaci game - program se sám nevypíná", "Error handling v Maze DFS algoritmu"]},
-            {"version": "1.8.0", "notes": ["Bludiště přepsáno na GRID-BASED systém (25x20, 32px buňky)", "ButtonFinder nahrazen ClickMaster (klikej na pohybující se cíl)", "Odstraněn Coming Soon popup - všechny levely dostupné!", "Jen 19 levelů - bez duplicit"]},
-            {"version": "1.9.0", "notes": ["Přepracován level 2: ClickMaster → Najdi jinou barvu (ColorBlind)", "Level 11: FindShape → Rotující obraz (RotatingImage) - rozpoznej tvar", "Level 13: Následuj barvy → Časová bomba (TimeBomb) - nový mode", "2048: Opraveno na cíl 1024 místo 2048 (hint aktualizován)", "Sudoku: Přidána validace pravidel (řádek, sloupec, blok)", "Memory: Opraveno max 2 karty současně, překrývání", "Hangman: Zobrazena kategorie slova na vrchu", "SpeedClick: Timer začíná až na první klik", "Přidán nový level 19: Coming Soon - připraveno na budoucí obsah", "Celkem 19 funkčních levelů - bez duplicit!"]},
-            {"version": "2.0.0", "notes": ["ALL BUGS FIXED - Game je nyní plně funkční!", "Level 3: Harder maze s více větvemi", "Level 2: Color shades místo rozdílných barev", "Level 11: Větší klikací plocha pro tlačítka", "Level 16: Správné spojování trubek", "Level 17: LaserMirrors s viditelným laserem a odrazy", "Level 20: Coming Soon popup se nyní zobrazuje!", "Patch notes aktualizovány na verzi 2.0.0"]}
+            {"version": "1.7.0", "notes": ["Nápověda změněna na SPACE SPACE (2x stisk)", "Opraveny chyby v inicializaci game - program se sám nevypíná", "Error handling v Maze DFS algoritmu"]}
         ]
         
-        self.version = self.patch_notes[-1]["version"]
+        # Use global GAME_VERSION constant
+        self.version = GAME_VERSION
 
+        self.current_game = None
+    
+    def initialize_ui_elements(self):
+        """Inicializuje všechny UI prvky na základě aktuálního rozlišení"""
         self.menu_buttons = {
-            "play": Button(SCREEN_WIDTH//2 - 110, 250, 220, 70, "PLAY"),
-            "patch": Button(SCREEN_WIDTH//2 - 120, 350, 240, 70, "PATCH NOTES"),
-            "settings": Button(SCREEN_WIDTH//2 - 110, 450, 220, 70, "SETTINGS"),
-            "exit": Button(SCREEN_WIDTH//2 - 110, 550, 220, 70, "QUIT")
+            "play": Button(self.screen_width//2 - 110, 250, 220, 70, "PLAY"),
+            "patch": Button(self.screen_width//2 - 120, 350, 240, 70, "PATCH NOTES"),
+            "settings": Button(self.screen_width//2 - 110, 450, 220, 70, "SETTINGS"),
+            "exit": Button(self.screen_width//2 - 110, 550, 220, 70, "QUIT")
         }
         
 
         self.settings_buttons = {
+            # FPS Controls
             "fps_down": Button(600, 280, 50, 50, "-", FONT_MEDIUM),
             "fps_up": Button(750, 280, 50, 50, "+", FONT_MEDIUM),
+            
+            # Graphics Section Buttons
             "graphics": Button(200, 250, 300, 60, "Graphics", FONT_SMALL),
+            
+            # Resolution Controls
+            "resolution_down": Button(600, 350, 50, 50, "<", FONT_MEDIUM),
+            "resolution_up": Button(750, 350, 50, 50, ">", FONT_MEDIUM),
+            
+            # Fullscreen Toggle
+            "fullscreen_toggle": Button(600, 410, 200, 50, "Fullscreen: OFF", FONT_SMALL),
+            
+            # VSync Toggle
+            "vsync_toggle": Button(600, 470, 200, 50, "VSync: ON", FONT_SMALL),
+            
+            # UI Scale Controls
+            "ui_scale_down": Button(600, 530, 50, 50, "-", FONT_MEDIUM),
+            "ui_scale_up": Button(750, 530, 50, 50, "+", FONT_MEDIUM),
+            
+            # Effects Toggle
+            "particles_toggle": Button(600, 590, 200, 50, "Particles: ON", FONT_SMALL),
+            "screen_shake_toggle": Button(600, 650, 200, 50, "Screen Shake: ON", FONT_SMALL),
+            
+            # Save button (Aplikuj změny)
+            "save": Button(self.screen_width//2 - 75, 720, 150, 50, "SAVE", FONT_SMALL),
+            
+            # Developer Section
             "developer": Button(200, 350, 300, 60, "Developer", FONT_SMALL),
-            "back": Button(SCREEN_WIDTH//2 - 100, 700, 200, 60, "BACK")
+            "back": Button(self.screen_width//2 - 100, 700, 200, 60, "BACK")
         }
         
 
@@ -128,34 +189,51 @@ class Game:
         
 
         self.patch_buttons = {
-            "back": Button(SCREEN_WIDTH//2 - 100, 700, 200, 60, "ZPĚT")
+            "back": Button(self.screen_width//2 - 100, 700, 200, 60, "ZPĚT")
         }
         
 
         self.play_buttons = {
-            "back": Button(SCREEN_WIDTH//2 - 100, 700, 200, 60, "ZPĚT")
+            "back": Button(self.screen_width//2 - 100, 700, 200, 60, "ZPĚT")
         }
         self.level_buttons = {}
         self.create_level_buttons()
         
   
         self.popup_buttons = {
-            "menu": Button(SCREEN_WIDTH//2 - 250, 400, 150, 60, "MENU"),
-            "restart": Button(SCREEN_WIDTH//2 - 50, 400, 150, 60, "RESTART"),
-            "next": Button(SCREEN_WIDTH//2 + 150, 400, 150, 60, "DALŠÍ")
+            "menu": Button(self.screen_width//2 - 250, 400, 150, 60, "MENU"),
+            "restart": Button(self.screen_width//2 - 50, 400, 150, 60, "RESTART"),
+            "next": Button(self.screen_width//2 + 150, 400, 150, 60, "DALŠÍ")
         }
         
         self.pause_buttons = {
-            "continue": Button(SCREEN_WIDTH//2 - 100, 350, 200, 60, "CONTINUE"),
-            "restart": Button(SCREEN_WIDTH//2 - 100, 450, 200, 60, "RESTART"),
-            "exit": Button(SCREEN_WIDTH//2 - 100, 550, 200, 60, "EXIT")
+            "continue": Button(self.screen_width//2 - 100, 350, 200, 60, "CONTINUE"),
+            "restart": Button(self.screen_width//2 - 100, 450, 200, 60, "RESTART"),
+            "exit": Button(self.screen_width//2 - 100, 550, 200, 60, "EXIT")
         }
-
-        self.current_game = None
+    
+    def change_resolution(self, resolution_str):
+        """Změní rozlišení a reinicializuje všechny prvky"""
+        try:
+            width, height = map(int, resolution_str.split("x"))
+            self.screen_width = width
+            self.screen_height = height
+            
+            # Aktualizuj display
+            self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
+            
+            # Reinicializuj všechna UI prvky s novým rozlišením
+            self.initialize_ui_elements()
+            
+            print(f"✅ Rozlišení změněno na {self.screen_width}x{self.screen_height}")
+            return True
+        except Exception as e:
+            print(f"❌ Chyba při změně rozlišení: {e}")
+            return False
         
     def create_level_buttons(self):
-        """Vytvoří tlačítka pro všech 20 levelů"""
-        for i in range(1, 21):
+        """Vytvoří tlačítka pro všech 19 levelů"""
+        for i in range(1, 20):
             col = (i - 1) % 5
             row = (i - 1) // 5
             x = 150 + col * 180
@@ -168,19 +246,19 @@ class Game:
         
   
         title = FONT_LARGE.render("MindLock!", True, CYAN)
-        title_rect = title.get_rect(center=(SCREEN_WIDTH//2, 90))
+        title_rect = title.get_rect(center=(self.screen_width//2, 90))
        
         shadow = FONT_LARGE.render("MindLock!", True, (0, 50, 80))
         self.screen.blit(shadow, (title_rect.x + 3, title_rect.y + 3))
         self.screen.blit(title, title_rect)
         
       
-        pygame.draw.line(self.screen, CYAN, (SCREEN_WIDTH//2 - 300, 160), (SCREEN_WIDTH//2 - 100, 160), 2)
-        pygame.draw.line(self.screen, CYAN, (SCREEN_WIDTH//2 + 100, 160), (SCREEN_WIDTH//2 + 300, 160), 2)
+        pygame.draw.line(self.screen, CYAN, (self.screen_width//2 - 300, 160), (self.screen_width//2 - 100, 160), 2)
+        pygame.draw.line(self.screen, CYAN, (self.screen_width//2 + 100, 160), (self.screen_width//2 + 300, 160), 2)
         
 
         subtitle = FONT_SMALL.render("Puzzle Game", True, (200, 200, 255))
-        subtitle_rect = subtitle.get_rect(center=(SCREEN_WIDTH//2, 180))
+        subtitle_rect = subtitle.get_rect(center=(self.screen_width//2, 180))
         self.screen.blit(subtitle, subtitle_rect)
         
   
@@ -192,11 +270,11 @@ class Game:
         self.screen.fill(DARK_BLUE)
         
         title = FONT_LARGE.render("PATCH NOTES", True, CYAN)
-        title_rect = title.get_rect(center=(SCREEN_WIDTH//2, 40))
+        title_rect = title.get_rect(center=(self.screen_width//2, 40))
         self.screen.blit(title, title_rect)
         
 
-        box_rect = pygame.Rect(150, 120, SCREEN_WIDTH - 300, 500)
+        box_rect = pygame.Rect(150, 120, self.screen_width - 300, 500)
         pygame.draw.rect(self.screen, DARK_GRAY, box_rect)
         pygame.draw.rect(self.screen, CYAN, box_rect, 3)
         
@@ -223,30 +301,111 @@ class Game:
         self.patch_buttons["back"].draw(self.screen)
     
     def draw_settings(self):
-        """Kreslí nastavení"""
+        """
+        Kreslí nastavení s rozšířeným Graphics menu.
+        
+        FPS ALIGNMENT FIX:
+        - Dynamicky centruje FPS hodnotu mezi minus a plus tlačítky
+        - Bez hardcoded pixelů
+        
+        GRAPHICS MENU EXPANSION:
+        - Resolution selector
+        - Fullscreen toggle
+        - VSync toggle
+        - UI Scale option
+        - Effects toggles
+        """
         self.screen.fill(DARK_BLUE)
         
         title = FONT_LARGE.render("SETTINGS", True, CYAN)
-        title_rect = title.get_rect(center=(SCREEN_WIDTH//2, 40))
+        title_rect = title.get_rect(center=(self.screen_width//2, 40))
         self.screen.blit(title, title_rect)
         
- 
+        # =====================================
+        # GRAPHICS SECTION
+        # =====================================
         graphics_button = self.settings_buttons["graphics"]
         graphics_button.draw(self.screen)
         
         if self.settings_expanded["graphics"]:
-   
+            # FPS Setting
             fps_label = FONT_SMALL.render("FPS:", True, WHITE)
             self.screen.blit(fps_label, (250, 320))
             
+            # FPS ALIGNMENT FIX: Dynamic centering between minus and plus buttons
+            fps_down_rect = self.settings_buttons["fps_down"].rect
+            fps_up_rect = self.settings_buttons["fps_up"].rect
+            fps_center_x = (fps_down_rect.right + fps_up_rect.left) // 2
+            fps_center_y = fps_down_rect.centery
+            
             fps_value = FONT_MEDIUM.render(str(self.fps), True, YELLOW)
-            fps_rect = fps_value.get_rect(center=(650, 310))
+            fps_rect = fps_value.get_rect(center=(fps_center_x, fps_center_y))
             self.screen.blit(fps_value, fps_rect)
             
             self.settings_buttons["fps_down"].draw(self.screen)
             self.settings_buttons["fps_up"].draw(self.screen)
+            
+            # =====================================
+            # RESOLUTION SELECTOR
+            # =====================================
+            res_label = FONT_SMALL.render("Resolution:", True, WHITE)
+            self.screen.blit(res_label, (250, 370))
+            
+            res_center_x = (self.settings_buttons["resolution_down"].rect.right + 
+                           self.settings_buttons["resolution_up"].rect.left) // 2
+            res_text = FONT_TINY.render(self.graphics_settings["resolution"], True, YELLOW)
+            res_rect = res_text.get_rect(center=(res_center_x, 375))
+            self.screen.blit(res_text, res_rect)
+            
+            self.settings_buttons["resolution_down"].draw(self.screen)
+            self.settings_buttons["resolution_up"].draw(self.screen)
+            
+            # =====================================
+            # FULLSCREEN TOGGLE
+            # =====================================
+            fullscreen_state = "ON" if self.graphics_settings["fullscreen"] else "OFF"
+            self.settings_buttons["fullscreen_toggle"].text = f"Fullscreen: {fullscreen_state}"
+            self.settings_buttons["fullscreen_toggle"].draw(self.screen)
+            
+            # =====================================
+            # VSYNC TOGGLE
+            # =====================================
+            vsync_state = "ON" if self.graphics_settings["vsync"] else "OFF"
+            self.settings_buttons["vsync_toggle"].text = f"VSync: {vsync_state}"
+            self.settings_buttons["vsync_toggle"].draw(self.screen)
+            
+            # =====================================
+            # UI SCALE OPTION
+            # =====================================
+            ui_scale_label = FONT_SMALL.render("UI Scale:", True, WHITE)
+            self.screen.blit(ui_scale_label, (250, 550))
+            
+            ui_scale_center_x = (self.settings_buttons["ui_scale_down"].rect.right + 
+                                self.settings_buttons["ui_scale_up"].rect.left) // 2
+            ui_scale_text = FONT_SMALL.render(f"{self.graphics_settings['ui_scale']}%", True, YELLOW)
+            ui_scale_rect = ui_scale_text.get_rect(center=(ui_scale_center_x, 555))
+            self.screen.blit(ui_scale_text, ui_scale_rect)
+            
+            self.settings_buttons["ui_scale_down"].draw(self.screen)
+            self.settings_buttons["ui_scale_up"].draw(self.screen)
+            
+            # =====================================
+            # EFFECTS TOGGLES
+            # =====================================
+            particles_state = "ON" if self.graphics_settings["particles"] else "OFF"
+            self.settings_buttons["particles_toggle"].text = f"Particles: {particles_state}"
+            self.settings_buttons["particles_toggle"].draw(self.screen)
+            
+            screen_shake_state = "ON" if self.graphics_settings["screen_shake"] else "OFF"
+            self.settings_buttons["screen_shake_toggle"].text = f"Screen Shake: {screen_shake_state}"
+            self.settings_buttons["screen_shake_toggle"].draw(self.screen)
+            
+            # SAVE button - Aplikuj změny rozlišení
+            self.settings_buttons["save"].draw(self.screen)
         
- 
+        # =====================================
+        # DEVELOPER SECTION
+        # =====================================
         developer_button = self.settings_buttons["developer"]
         developer_button.draw(self.screen)
         
@@ -271,7 +430,7 @@ class Game:
         self.screen.fill(DARK_BLUE)
         
         title = FONT_LARGE.render("VYBRAT LEVEL", True, CYAN)
-        title_rect = title.get_rect(center=(SCREEN_WIDTH//2, 30))
+        title_rect = title.get_rect(center=(self.screen_width//2, 30))
         self.screen.blit(title, title_rect)
         
         for level_num, button in self.level_buttons.items():
@@ -284,14 +443,8 @@ class Game:
                     self.screen.blit(done_text, done_rect)
                 else:
                     button.draw(self.screen)
-            elif level_num == 20:
-                # Level 20 - Coming Soon, vždy viditelný
-                pygame.draw.rect(self.screen, (100, 50, 0), button.rect)
-                pygame.draw.rect(self.screen, YELLOW, button.rect, 3)
-                soon_text = FONT_SMALL.render("COMING SOON", True, YELLOW)
-                soon_rect = soon_text.get_rect(center=button.rect.center)
-                self.screen.blit(soon_text, soon_rect)
             else:
+                # No special display for levels beyond 19
                 pygame.draw.rect(self.screen, DARK_GRAY, button.rect)
                 pygame.draw.rect(self.screen, GRAY, button.rect, 3)
                 lock_text = FONT_SMALL.render("LOCKED", True, RED)
@@ -303,7 +456,7 @@ class Game:
     def draw_popup_menu(self):
         """Kreslí popup menu po skončení levelu"""
 
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        overlay = pygame.Surface((self.screen_width, self.screen_height))
         overlay.set_alpha(200)
         overlay.fill(BLACK)
         self.screen.blit(overlay, (0, 0))
@@ -313,35 +466,29 @@ class Game:
         else:
             title = FONT_LARGE.render("YOU LOST!", True, RED)
         
-        title_rect = title.get_rect(center=(SCREEN_WIDTH//2, 250))
+        title_rect = title.get_rect(center=(self.screen_width//2, 250))
         self.screen.blit(title, title_rect)
         
         # Zobraz čas pro ReactionTime
         if hasattr(self.current_game, 'reaction_time_ms') and self.current_game.reaction_time_ms > 0:
             time_text = FONT_MEDIUM.render(f"Cas: {self.current_game.reaction_time_ms} ms", True, YELLOW)
-            self.screen.blit(time_text, (SCREEN_WIDTH//2 - 180, 350))
+            self.screen.blit(time_text, (self.screen_width//2 - 180, 350))
         
         self.popup_buttons["menu"].draw(self.screen)
         self.popup_buttons["restart"].draw(self.screen)
         
-        if self.game_won and self.current_level < 20:
+        if self.game_won and self.current_level < 19:
             self.popup_buttons["next"].draw(self.screen)
-        elif self.current_level == 20:
-            final_text = FONT_SMALL.render("COMING SOON - zkuste jiný level!", True, YELLOW)
-            self.screen.blit(final_text, (SCREEN_WIDTH//2 - 300, 500))
-        elif self.current_level == 19 and self.game_won:
-            final_text = FONT_SMALL.render("LEVEL 19 COMPLETED - Zbývá Coming Soon!", True, YELLOW)
-            self.screen.blit(final_text, (SCREEN_WIDTH//2 - 300, 500))
     
     def draw_pause_menu(self):
         """Kreslí pause menu"""
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        overlay = pygame.Surface((self.screen_width, self.screen_height))
         overlay.set_alpha(200)
         overlay.fill(BLACK)
         self.screen.blit(overlay, (0, 0))
         
         title = FONT_LARGE.render("PAUSE", True, YELLOW)
-        title_rect = title.get_rect(center=(SCREEN_WIDTH//2, 200))
+        title_rect = title.get_rect(center=(self.screen_width//2, 200))
         self.screen.blit(title, title_rect)
         
         self.pause_buttons["continue"].draw(self.screen)
@@ -350,18 +497,18 @@ class Game:
     
     def draw_hint_popup(self):
         """Kreslí hint popup"""
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        overlay = pygame.Surface((self.screen_width, self.screen_height))
         overlay.set_alpha(180)
         overlay.fill(BLACK)
         self.screen.blit(overlay, (0, 0))
         
         hint_title = FONT_LARGE.render("NAPOVEDA", True, YELLOW)
-        hint_title_rect = hint_title.get_rect(center=(SCREEN_WIDTH//2, 300))
+        hint_title_rect = hint_title.get_rect(center=(self.screen_width//2, 300))
         self.screen.blit(hint_title, hint_title_rect)
         
         hint = self.current_game.get_hint()
         hint_text = FONT_MEDIUM.render(hint, True, GREEN)
-        hint_rect = hint_text.get_rect(center=(SCREEN_WIDTH//2, 450))
+        hint_rect = hint_text.get_rect(center=(self.screen_width//2, 450))
         
         box_rect = pygame.Rect(hint_rect.x - 40, hint_rect.y - 20, hint_rect.width + 80, hint_rect.height + 40)
         pygame.draw.rect(self.screen, BLUE, box_rect)
@@ -369,7 +516,7 @@ class Game:
         self.screen.blit(hint_text, hint_rect)
         
         close_text = FONT_SMALL.render("Klikni kdekoliv pro zavreni", True, WHITE)
-        close_rect = close_text.get_rect(center=(SCREEN_WIDTH//2, 600))
+        close_rect = close_text.get_rect(center=(self.screen_width//2, 600))
         self.screen.blit(close_text, close_rect)
     
     def handle_menu_click(self, pos):
@@ -389,24 +536,93 @@ class Game:
             self.state = GameState.MENU
     
     def handle_settings_click(self, pos):
-        """Zpracuje klik v nastavení"""
+        """
+        Zpracuje klik v nastavení.
+        
+        Includes:
+        - FPS adjustment
+        - Graphics menu expansion (GRAPHICS MENU EXPANSION)
+        - Resolution cycling
+        - Fullscreen, VSync, UI Scale, Effects toggles
+        """
         if self.settings_buttons["graphics"].is_clicked(pos):
             self.settings_expanded["graphics"] = not self.settings_expanded["graphics"]
         elif self.settings_buttons["developer"].is_clicked(pos):
             self.settings_expanded["developer"] = not self.settings_expanded["developer"]
-        elif self.settings_expanded["graphics"] and self.settings_buttons["fps_down"].is_clicked(pos):
-            self.fps = max(10, self.fps - 10)
-        elif self.settings_expanded["graphics"] and self.settings_buttons["fps_up"].is_clicked(pos):
-            self.fps = min(240, self.fps + 10)
-        elif self.settings_buttons["back"].is_clicked(pos):
+        
+        # Handle Graphics menu clicks (only if expanded)
+        elif self.settings_expanded["graphics"]:
+            # FPS Controls
+            if self.settings_buttons["fps_down"].is_clicked(pos):
+                self.fps = max(10, self.fps - 10)
+            elif self.settings_buttons["fps_up"].is_clicked(pos):
+                self.fps = min(240, self.fps + 10)
+            
+            # Resolution Controls - cycle through available resolutions
+            elif self.settings_buttons["resolution_down"].is_clicked(pos):
+                current_res = self.graphics_settings["resolution"]
+                current_idx = self.available_resolutions.index(current_res)
+                new_idx = (current_idx - 1) % len(self.available_resolutions)
+                new_res = self.available_resolutions[new_idx]
+                self.graphics_settings["resolution"] = new_res
+                self.change_resolution(new_res)
+                
+            elif self.settings_buttons["resolution_up"].is_clicked(pos):
+                current_res = self.graphics_settings["resolution"]
+                current_idx = self.available_resolutions.index(current_res)
+                new_idx = (current_idx + 1) % len(self.available_resolutions)
+                new_res = self.available_resolutions[new_idx]
+                self.graphics_settings["resolution"] = new_res
+                self.change_resolution(new_res)
+            
+            # Fullscreen Toggle
+            elif self.settings_buttons["fullscreen_toggle"].is_clicked(pos):
+                self.graphics_settings["fullscreen"] = not self.graphics_settings["fullscreen"]
+                # TODO: Update display mode with FULLSCREEN flag if needed
+            
+            # VSync Toggle
+            elif self.settings_buttons["vsync_toggle"].is_clicked(pos):
+                self.graphics_settings["vsync"] = not self.graphics_settings["vsync"]
+                # TODO: Update pygame display flags if needed
+            
+            # UI Scale Controls
+            elif self.settings_buttons["ui_scale_down"].is_clicked(pos):
+                current_scale = self.graphics_settings["ui_scale"]
+                current_idx = self.available_ui_scales.index(current_scale)
+                new_idx = (current_idx - 1) % len(self.available_ui_scales)
+                self.graphics_settings["ui_scale"] = self.available_ui_scales[new_idx]
+                # UI scale by itself doesn't require full reinit
+            
+            elif self.settings_buttons["ui_scale_up"].is_clicked(pos):
+                current_scale = self.graphics_settings["ui_scale"]
+                current_idx = self.available_ui_scales.index(current_scale)
+                new_idx = (current_idx + 1) % len(self.available_ui_scales)
+                self.graphics_settings["ui_scale"] = self.available_ui_scales[new_idx]
+                # UI scale by itself doesn't require full reinit
+            
+            # Effects Toggles
+            elif self.settings_buttons["particles_toggle"].is_clicked(pos):
+                self.graphics_settings["particles"] = not self.graphics_settings["particles"]
+            
+            elif self.settings_buttons["screen_shake_toggle"].is_clicked(pos):
+                self.graphics_settings["screen_shake"] = not self.graphics_settings["screen_shake"]
+            
+            # SAVE button - Aplikuj změny rozlišení
+            elif self.settings_buttons["save"].is_clicked(pos):
+                # Změň rozlišení pokud se změnilo
+                new_res = self.graphics_settings["resolution"]
+                print(f"✅ [SETTINGS SAVED] Rozlišení: {new_res}")
+        
+        # Back button (always available)
+        if self.settings_buttons["back"].is_clicked(pos):
             self.state = GameState.MENU
     
     def handle_play_click(self, pos):
         """Zpracuje klik v play menu"""
-        # Zkontroluj odemčené levely - všechny lze hrát, level 20 je Coming Soon
+        # Zkontroluj odemčené levely (1-19)
         for level_num, button in self.level_buttons.items():
             if button.is_clicked(pos):
-                if level_num <= self.unlocked_levels or level_num == 20:
+                if level_num <= self.unlocked_levels:
                     try:
                         self.current_level = level_num
                         self.game_won = False
@@ -440,8 +656,8 @@ class Game:
             except Exception as e:
                 print(f"Chyba při restartování levelu: {e}")
                 self.state = GameState.PLAYING
-        elif self.game_won and self.current_level < 20 and self.popup_buttons["next"].is_clicked(pos):
-            if self.current_level < 20:
+        elif self.game_won and self.current_level < 19 and self.popup_buttons["next"].is_clicked(pos):
+            if self.current_level < 19:
                 self.current_level += 1
                 try:
                     self.current_game = self.create_game_level(self.current_level)
@@ -480,7 +696,7 @@ class Game:
             ("ColorBlind", lambda: ColorBlind()),
             ("Maze", lambda: Maze()),
             ("TetrisLite", lambda: TetrisLite()),
-            ("Game2048", lambda: Game2048()),
+            ("128", lambda: Game128()),
             ("ColorMatch", lambda: ColorMatch()),
             ("RiddleGame", lambda: RiddleGame()),
             ("SudokuLite", lambda: SudokuLite()),
@@ -494,8 +710,7 @@ class Game:
             ("PipeRotate", lambda: PipeRotate()),
             ("LaserMirrors", lambda: LaserMirrors()),
             ("CableConnect", lambda: CableConnect()),
-            ("ClickMaster_ComingSoon", lambda: ComingSoonGame()),
-            ("FutureGame_ComingSoon", lambda: ComingSoonGame())
+            ("WordUnscrambler", lambda: WordUnscrambler())  # Level 19 - Word Unscrambler game
         ]
         
         try:
@@ -572,7 +787,7 @@ class Game:
                 if event.key == pygame.K_o:
                     self.admin_mode = not self.admin_mode
                     if self.admin_mode:
-                        self.unlocked_levels = 20
+                        self.unlocked_levels = 19
                     else:
                         self.unlocked_levels = 1
                 if self.state == GameState.GAME:
@@ -627,7 +842,7 @@ class Game:
                 self.current_game.draw(self.screen)
                 
                 level_text = FONT_SMALL.render(f"Level: {self.current_level}/19", True, WHITE)
-                self.screen.blit(level_text, (SCREEN_WIDTH - 200, 10))
+                self.screen.blit(level_text, (self.screen_width - 200, 10))
                 
                 hint_text = FONT_TINY.render("Napoveda: 2x SPACE | ESC: Menu", True, YELLOW)
                 self.screen.blit(hint_text, (10, 10))
@@ -681,81 +896,124 @@ class BaseGame:
         return "Zkus tlačítko!"
 
 class Maze(BaseGame):
-    """Grid-based maze - hráč se pohybuje po mřížce, 20x20 nebo větší"""
+    """Grid-based maze - hráč se pohybuje po mřížce, 21x25 (lichá čísla pro DFS)"""
     def __init__(self):
         super().__init__()
         self.CELL_SIZE = 32
         self.COLS = 25
-        self.ROWS = 20
+        self.ROWS = 21
         
-        # Hardcoded maze s mnoha cestami a dead ends
-        self.grid = self.generate_maze()
+        # Generuj mapu, dokud není validní
+        self.grid = self.generate_valid_maze()
         
         self.player_row = 0
         self.player_col = 0
-        self.goal_row = 19
+        self.goal_row = 20
         self.goal_col = 24
-        
-    def generate_maze(self):
-        """Generuje složitější bludiště s více mrtvými cestami a zákruty"""
-        # 1 = cesta (walkable), 0 = zeď (wall)
-        maze = [
-            [1,1,1,1,1,0,1,0,1,1,1,0,1,0,1,0,1,1,1,0,1,0,1,1,1],
-            [1,0,0,0,1,0,1,0,0,0,1,0,1,0,1,0,1,0,0,0,1,0,0,0,1],
-            [1,0,1,0,1,0,1,1,1,0,1,0,1,0,1,0,1,0,1,1,1,1,1,0,1],
-            [1,0,1,0,0,0,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,0,1,0,1],
-            [1,0,1,1,1,1,1,0,1,1,1,1,1,0,1,1,1,0,1,0,1,1,1,0,1],
-            [1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,1],
-            [1,1,1,0,1,0,1,0,1,1,1,1,1,1,1,0,1,0,1,1,1,0,1,1,1],
-            [1,0,0,0,1,0,1,0,1,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,1],
-            [1,0,1,1,1,0,1,0,1,0,1,1,1,0,1,0,1,1,1,0,1,0,1,1,1],
-            [1,0,1,0,0,0,1,0,1,0,1,0,0,0,1,0,0,0,1,0,1,0,0,0,1],
-            [1,0,1,0,1,1,1,0,1,0,1,0,1,1,1,1,1,0,1,0,1,1,1,0,1],
-            [1,0,1,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0,1,0,0,0,1,0,1],
-            [1,0,1,0,1,0,1,1,1,1,1,0,1,0,1,0,1,0,1,1,1,0,1,0,1],
-            [1,0,1,0,0,0,1,0,0,0,0,0,1,0,1,0,0,0,0,0,1,0,1,0,1],
-            [1,0,1,1,1,0,1,0,1,1,1,1,1,0,1,1,1,1,1,0,1,0,1,0,1],
-            [1,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,1],
-            [1,1,1,0,1,1,1,0,1,0,1,1,1,1,1,1,1,1,1,1,1,0,1,0,1],
-            [1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,1],
-            [1,0,1,1,1,0,1,1,1,0,1,0,1,1,1,1,1,1,1,1,1,1,1,0,1],
-            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-        ]
-        
-        # Ověřit BFS cestu od startu k cíli
-        if not self.is_path_exists(maze, 0, 0, 19, 24):
-            print("⚠️  Maze nemá cestu! Regeneruji na jednoduchou liniju...")
-            maze = self.create_simple_maze()
-        
-        return maze
     
-    def is_path_exists(self, maze, start_row, start_col, goal_row, goal_col):
-        """BFS - ověří, že existuje cesta od startu k cíli"""
-        from collections import deque
-        queue = deque([(start_row, start_col)])
-        visited = {(start_row, start_col)}
+    def generate_valid_maze(self):
+        """Generuje bludiště dokud není validní (existuje cesta k cíli)"""
+        max_attempts = 10
+        for attempt in range(max_attempts):
+            maze = self.generate_maze()
+            if self.has_valid_path(maze):
+                print(f"✅ Maze válida na pokusu {attempt + 1}")
+                return maze
+        
+        # Fallback - vrať jednoduchou mapu která je vždy hratelná
+        print(f"❌ Maze nebyla validní po {max_attempts} pokusech - vrácení fallback mapy")
+        return self.generate_simple_fallback_maze()
+    
+    def has_valid_path(self, maze):
+        """Ověř BFS, že existuje cesta od startu (0,0) k cíli (20,24)"""
+        if maze[0][0] == 0 or maze[20][24] == 0:
+            return False
+        
+        visited = set()
+        queue = deque([(0, 0)])
+        visited.add((0, 0))
         
         while queue:
             row, col = queue.popleft()
-            if row == goal_row and col == goal_col:
+            
+            if row == 20 and col == 24:
                 return True
             
-            for dr, dc in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+            # Zkontroluj čtyři směry (nahoru, dolů, doleva, doprava)
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                 nr, nc = row + dr, col + dc
+                
                 if 0 <= nr < len(maze) and 0 <= nc < len(maze[0]):
-                    if maze[nr][nc] == 1 and (nr, nc) not in visited:
+                    if (nr, nc) not in visited and maze[nr][nc] == 1:
                         visited.add((nr, nc))
                         queue.append((nr, nc))
         
         return False
     
-    def create_simple_maze(self):
-        """Vytvoří jednoduchou cestu na okraj"""
-        maze = [[0] * 25 for _ in range(20)]
-        for col in range(25):
-            maze[0][col] = 1
-            maze[19][col] = 1
+    def generate_simple_fallback_maze(self):
+        """Fallback - vytvoří jednoduchou hratelnou mapu"""
+        rows = self.ROWS
+        cols = self.COLS
+        maze = [[0 for _ in range(cols)] for _ in range(rows)]
+        
+        # Vytvoř jednoduchou cestu přímou kupředu
+        for r in range(rows):
+            maze[r][2] = 1  # Levý průchod
+            maze[r][cols - 3] = 1  # Pravý průchod
+        
+        for c in range(cols):
+            maze[1][c] = 1  # Horní průchod
+            maze[rows - 2][c] = 1  # Dolní průchod
+        
+        # Ujisti se, že start a cíl jsou průchodné
+        maze[0][0] = 1
+        maze[rows - 1][cols - 1] = 1
+        
         return maze
+    
+    def generate_maze(self):
+        """
+        Generuje skutečné bludiště pomocí DFS (Recursive Backtracking algoritmu).
+        1 = cesta (walkable)
+        0 = zeď (wall)
+        """
+        rows = self.ROWS
+        cols = self.COLS
+        
+        # Celé pole jako zeď
+        maze = [[0 for _ in range(cols)] for _ in range(rows)]
+        
+        def carve(r, c):
+            """Rekurzivní funkce k vyřezávání cest - DFS backtracking"""
+            directions = [(0, 2), (2, 0), (0, -2), (-2, 0)]  # doprava, dolů, doleva, nahoru
+            random.shuffle(directions)
+            
+            for dr, dc in directions:
+                nr = r + dr
+                nc = c + dc
+                
+                if 0 <= nr < rows and 0 <= nc < cols and maze[nr][nc] == 0:
+                    # Vyřežeme cestu mezi aktuální a novou buňkou
+                    maze[r + dr // 2][c + dc // 2] = 1
+                    maze[nr][nc] = 1
+                    carve(nr, nc)
+        
+        # Začni z (1, 1) - lichý index pro správný DFS
+        maze[1][1] = 1
+        carve(1, 1)
+        
+        # Ujištění, že start a cíl jsou průchozí
+        maze[0][0] = 1
+        maze[rows - 1][cols - 1] = 1
+        
+        # ROZŠÍŘENÍ CEST: Odstraň některé zdi náhodně pro větší prostor
+        for i in range(rows):
+            for j in range(cols):
+                if maze[i][j] == 0 and random.random() < 0.12:  # Sníženo na 12% pro lepší strukturu
+                    maze[i][j] = 1
+        
+        return maze
+
     
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
@@ -780,11 +1038,19 @@ class Maze(BaseGame):
     def draw(self, screen):
         screen.fill(DARK_BLUE)
         
+        # Získej aktuální rozlišení
+        screen_w = screen.get_width()
+        screen_h = screen.get_height()
+        
+        # Offset pro vystředění (dynamicky podle rozlišení)
+        offset_x = (screen_w - self.COLS * self.CELL_SIZE) // 2
+        offset_y = (screen_h - self.ROWS * self.CELL_SIZE) // 2
+        
         # Nakresli grid
         for row in range(self.ROWS):
             for col in range(self.COLS):
-                x = col * self.CELL_SIZE
-                y = row * self.CELL_SIZE
+                x = offset_x + col * self.CELL_SIZE
+                y = offset_y + row * self.CELL_SIZE
                 
                 if self.grid[row][col] == 0:
                     # Zeď - hnědá
@@ -795,21 +1061,26 @@ class Maze(BaseGame):
                     pygame.draw.rect(screen, (60, 60, 90), pygame.Rect(x, y, self.CELL_SIZE, self.CELL_SIZE), 1)
         
         # Cíl - zelený
-        goal_x = self.goal_col * self.CELL_SIZE + 4
-        goal_y = self.goal_row * self.CELL_SIZE + 4
+        goal_x = offset_x + self.goal_col * self.CELL_SIZE + 4
+        goal_y = offset_y + self.goal_row * self.CELL_SIZE + 4
         pygame.draw.rect(screen, GREEN, pygame.Rect(goal_x, goal_y, self.CELL_SIZE - 8, self.CELL_SIZE - 8))
         
+        # Start pozice - modrý čtverec v poli
+        start_x = offset_x + 0 * self.CELL_SIZE + 4
+        start_y = offset_y + 0 * self.CELL_SIZE + 4
+        pygame.draw.rect(screen, BLUE, pygame.Rect(start_x, start_y, self.CELL_SIZE - 8, self.CELL_SIZE - 8))
+        
         # Hráč - tyrkysový čtverec
-        player_x = self.player_col * self.CELL_SIZE + 4
-        player_y = self.player_row * self.CELL_SIZE + 4
+        player_x = offset_x + self.player_col * self.CELL_SIZE + 4
+        player_y = offset_y + self.player_row * self.CELL_SIZE + 4
         pygame.draw.rect(screen, CYAN, pygame.Rect(player_x, player_y, self.CELL_SIZE - 8, self.CELL_SIZE - 8))
         
         # Instrukce
         title = FONT_MEDIUM.render("BLUDIŠTĚ", True, YELLOW)
-        screen.blit(title, (50, 700))
+        screen.blit(title, (50, screen_h - 150))
         
         instr = FONT_SMALL.render("ŠIPKY/WSAD = Pohyb | Dorazit na ZELENÝ CÍL", True, WHITE)
-        screen.blit(instr, (50, 750))
+        screen.blit(instr, (50, screen_h - 100))
     
     def get_hint(self):
         return "Hledej cestu na zelený čtverec vpravo dole!"
@@ -827,19 +1098,36 @@ class SimonSays(BaseGame):
         self.round = 1
         self.round_delay = 0
         self.sequence_delay = 0
+        self.circle_radius = 75
     
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN and self.waiting_for_input:
             pos = event.pos
-            for i in range(4):
-                col = i % 2
-                row = i // 2
-                x = 300 + col * 200
-                y = 250 + row * 200
-                if pygame.Rect(x, y, 150, 150).collidepoint(pos):
+            # Detekce kliknutí na 4 barevná kolečka - získej dynamické rozlišení
+            screen_w, screen_h = pygame.display.get_surface().get_size()
+            
+            circle_positions = [
+                (screen_w//2 - 100, screen_h//2 - 100),  # Kolečko 0 - levé horní (RED)
+                (screen_w//2 + 100, screen_h//2 - 100),  # Kolečko 1 - pravé horní (YELLOW)
+                (screen_w//2 - 100, screen_h//2 + 100),  # Kolečko 2 - levé dolní (GREEN)
+                (screen_w//2 + 100, screen_h//2 + 100),  # Kolečko 3 - pravé dolní (BLUE)
+            ]
+            
+            # Otestuj každé kolečko pomocí vzdálenosti
+            for i, (cx, cy) in enumerate(circle_positions):
+                dx = pos[0] - cx
+                dy = pos[1] - cy
+                dist = math.sqrt(dx**2 + dy**2)
+                
+                if dist <= self.circle_radius:
+                    # Hráč kliknul na kolečko i
                     self.player_sequence.append(i)
+                    
+                    # Zablikej kolečko na potvrzení
                     self.lights_on[i] = True
-                    self.light_timer = 30
+                    self.light_timer = 15
+                    
+                    # Zkontroluj, zda je vstup správný
                     self.check_sequence()
                     break
     
@@ -858,54 +1146,82 @@ class SimonSays(BaseGame):
     def play_sequence(self):
         if self.current_step < len(self.sequence):
             self.lights_on[self.sequence[self.current_step]] = True
-            self.light_timer = 30
+            # Zrychluj i délku osvětlení
+            self.light_timer = max(15, 30 - (len(self.sequence) // 2))
             self.current_step += 1
-            self.sequence_delay = 35
+            # Zrychluj delay mezi prvky - čím více prvků, tím rychlejší
+            self.sequence_delay = max(10, 35 - (len(self.sequence) * 2))
         else:
             self.waiting_for_input = True
             self.player_sequence = []
     
     def check_sequence(self):
-        if self.player_sequence[-1] != self.sequence[len(self.player_sequence) - 1]:
+        # Porovnej poslední vstup hráče se sekvencí
+        current_index = len(self.player_sequence) - 1
+        
+        # Pokud je vstup špatný, prohra
+        if self.player_sequence[current_index] != self.sequence[current_index]:
             self.lost = True
-        elif len(self.player_sequence) == len(self.sequence):
-            if len(self.sequence) == 5:
+            return
+        
+        # Pokud hráč dokončil sekvenci úspěšně
+        if len(self.player_sequence) == len(self.sequence):
+            if len(self.sequence) == 8:
+                # Výhra - dosáhli jsme 8 kol
                 self.won = True
             else:
+                # Přidej další prvek sekvence a pokračuj
                 self.sequence.append(random.randint(0, 3))
                 self.waiting_for_input = False
                 self.current_step = 0
                 self.round += 1
-                self.round_delay = 120
+                # Zrychluj sekvenci - čím vyšší kolo, tím rychlejší
+                base_delay = max(15, 120 - (len(self.sequence) * 5))
+                self.round_delay = base_delay
     
     def draw(self, screen):
         screen.fill(DARK_BLUE)
         
+        # Získej aktuální rozlišení
+        screen_w = screen.get_width()
+        screen_h = screen.get_height()
+        
         title = FONT_LARGE.render("SIMON SAYS", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH//2 - 150, 30))
+        screen.blit(title, (screen_w//2 - 150, 30))
         
-        # Tlačítka
+        # Pozice koleček (dynamicky podle rozlišení)
+        circle_positions = [
+            (screen_w//2 - 100, screen_h//2 - 100),  # Levé horní
+            (screen_w//2 + 100, screen_h//2 - 100),  # Pravé horní
+            (screen_w//2 - 100, screen_h//2 + 100),  # Levé dolní
+            (screen_w//2 + 100, screen_h//2 + 100),  # Pravé dolní
+        ]
+        
+        # Nakresli 4 barevná kolečka
         for i in range(4):
-            col = i % 2
-            row = i // 2
-            x = 300 + col * 200
-            y = 250 + row * 200
+            cx, cy = circle_positions[i]
             color = self.colors[i] if not self.lights_on[i] else (255, 255, 255)
-            pygame.draw.circle(screen, color, (x + 75, y + 75), 75)
+            pygame.draw.circle(screen, color, (cx, cy), self.circle_radius)
+            # Přidej outline pro lepší viditelnost
+            pygame.draw.circle(screen, WHITE, (cx, cy), self.circle_radius, 3)
         
-        # Info
-        info = FONT_MEDIUM.render(f"Kolo: {self.round}", True, YELLOW)
-        screen.blit(info, (SCREEN_WIDTH//2 - 80, 500))
+        # Info s pokrokem
+        info = FONT_MEDIUM.render(f"Kolo: {self.round}/8 | Délka: {len(self.sequence)}", True, YELLOW)
+        screen.blit(info, (screen_w//2 - 250, 550))
+        
+        # Zobraz pokrok v sekvenci
+        progress = FONT_SMALL.render(f"Tvá řada: {len(self.player_sequence)}/{len(self.sequence)}", True, CYAN)
+        screen.blit(progress, (screen_w//2 - 200, 600))
         
         if self.waiting_for_input:
             instr = FONT_SMALL.render("Tvůj tah! Klikej na světla", True, GREEN)
         else:
             instr = FONT_SMALL.render("Sleduj sekvenci...", True, WHITE)
-        screen.blit(instr, (SCREEN_WIDTH//2 - 180, 600))
+        screen.blit(instr, (screen_w//2 - 200, 650))
         
         if self.lost:
             lose = FONT_LARGE.render("ŠPATNĚ!", True, RED)
-            screen.blit(lose, (SCREEN_WIDTH//2 - 100, 650))
+            screen.blit(lose, (screen_w//2 - 150, 700))
     
     def get_hint(self):
         return "Zapamatuj si pořadí barev!"
@@ -980,7 +1296,7 @@ class ClickMaster(BaseGame):
         return "Klikej přesně na červený kruh!"
 
 class TetrisLite(BaseGame):
-    """Lehký Tetris"""
+    """Lehký Tetris s rotací"""
     def __init__(self):
         super().__init__()
         self.grid = [[0] * 6 for _ in range(10)]
@@ -996,16 +1312,45 @@ class TetrisLite(BaseGame):
         self.lines_cleared = 0
     
     def new_piece(self):
-        return random.choice(self.pieces)
+        return [row[:] for row in random.choice(self.pieces)]
+    
+    def rotate_piece(self):
+        """Otočí aktuální blok o 90 stupňů v matici"""
+        if len(self.piece) <= 1:
+            return  # Čtverce se neotáčí
+        
+        # Vytvoř rotovaný kus
+        rotated = []
+        rows = len(self.piece)
+        cols = len(self.piece[0])
+        
+        for c in range(cols):
+            new_row = []
+            for r in range(rows - 1, -1, -1):
+                new_row.append(self.piece[r][c])
+            rotated.append(new_row)
+        
+        # Uloží původní kus na fallback
+        original = self.piece
+        self.piece = rotated
+        
+        # Zkontroluj, jestli je to validní pozice
+        if not self.can_place(self.piece_x, self.piece_y):
+            # Vrať původní kus - rotace se nemůže provést
+            self.piece = original
     
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
             if event.key in [pygame.K_a, pygame.K_LEFT]:
-                self.piece_x = max(0, self.piece_x - 1)
+                if self.can_place(self.piece_x - 1, self.piece_y):
+                    self.piece_x -= 1
             elif event.key in [pygame.K_d, pygame.K_RIGHT]:
-                self.piece_x = min(6 - len(self.piece[0]), self.piece_x + 1)
+                if self.can_place(self.piece_x + 1, self.piece_y):
+                    self.piece_x += 1
             elif event.key in [pygame.K_s, pygame.K_DOWN]:
                 self.fall()
+            elif event.key == pygame.K_r:
+                self.rotate_piece()
     
     def fall(self):
         """Padá kus dolů"""
@@ -1069,8 +1414,11 @@ class TetrisLite(BaseGame):
     def draw(self, screen):
         screen.fill(DARK_BLUE)
         
+        screen_w = screen.get_width()
+        screen_h = screen.get_height()
+        
         title = FONT_LARGE.render("LEHKÝ TETRIS", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH//2 - 150, 30))
+        screen.blit(title, (screen_w//2 - 150, 30))
         
         # Hrací pole
         start_x = 300
@@ -1093,22 +1441,23 @@ class TetrisLite(BaseGame):
                     pygame.draw.rect(screen, YELLOW, pygame.Rect(x, y, cell_size, cell_size))
         
         score_text = FONT_SMALL.render(f"Řady: {self.lines_cleared}/3", True, WHITE)
-        screen.blit(score_text, (SCREEN_WIDTH//2 - 80, 600))
+        screen.blit(score_text, (screen_w//2 - 80, 600))
         
-        instr = FONT_TINY.render("A/D nebo ŠIPKY - Pohyb | S/DOWN - Pád", True, WHITE)
-        screen.blit(instr, (100, SCREEN_HEIGHT - 50))
+        instr = FONT_TINY.render("A/D nebo ŠIPKY - Pohyb | S/DOWN - Pád | R - Rotace", True, WHITE)
+        screen.blit(instr, (100, screen_h - 50))
     
     def get_hint(self):
-        return "Vymaž 3 řady!"
+        return "Vymaž 3 řady! R = rotace"
 
-class Game2048(BaseGame):
-    """2048 - zjednodušená verze"""
+class Game128(BaseGame):
+    """128 - zjednodušená verze 2048"""
     def __init__(self):
         super().__init__()
         self.grid = [[0] * 4 for _ in range(4)]
         self.add_new_tile()
         self.add_new_tile()
         self.moves = 0
+        self.target_value = 128  # Cílová hodnota místo 2048
     
     def add_new_tile(self):
         """Přidá nové číslo"""
@@ -1132,7 +1481,8 @@ class Game2048(BaseGame):
             if moved:
                 self.add_new_tile()
                 self.moves += 1
-                if any(1024 in row for row in self.grid):
+                # Zkontroluj výhru na 128
+                if any(self.target_value in row for row in self.grid):
                     self.won = True
     
     def move_left(self):
@@ -1243,8 +1593,11 @@ class Game2048(BaseGame):
     def draw(self, screen):
         screen.fill(DARK_BLUE)
         
-        title = FONT_LARGE.render("2048", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH//2 - 100, 30))
+        screen_w = screen.get_width()
+        screen_h = screen.get_height()
+        
+        title = FONT_LARGE.render("128", True, CYAN)
+        screen.blit(title, (screen_w//2 - 50, 30))
         
         start_x = 400
         start_y = 200
@@ -1266,10 +1619,10 @@ class Game2048(BaseGame):
                 pygame.draw.rect(screen, WHITE, rect, 2)
         
         instr = FONT_SMALL.render("WSAD nebo ŠIPKY - Pohybuj čísla", True, WHITE)
-        screen.blit(instr, (SCREEN_WIDTH//2 - 200, 650))
+        screen.blit(instr, (screen_w//2 - 200, 650))
     
     def get_hint(self):
-        return "Skládej stejná čísla, dosáhni 1024!"
+        return "Skládej stejná čísla, dosáhni 128!"
 
 class BalanceGame(BaseGame):
     """Hra s váhou - vyvážit předměty"""
@@ -1605,59 +1958,94 @@ class SwitchGame(BaseGame):
         return "Každé kliknutí změní stav sousedů!"
 
 class WordUnscrambler(BaseGame):
-    """Zamíchané slovo - roztřída písmena správně"""
+    """Zamíchané slovo - psaní textu + klikání na písmena"""
     def __init__(self):
         super().__init__()
         self.word_pairs = [
             ("AHOJ", "HOJA"),
-            ("HLAVA", "AALHV"),
-            ("PSANÍ", "NASIP"),
+            ("HLAVA", "VAHLA"),
+            ("PSANÍ", "NASÍP"),
             ("OKNO", "ONKO"),
-            ("STŮL", "SULT"),
+            ("STŮL", "LŮST"),
             ("KNIHA", "NHKIA"),
             ("BARVA", "VARBA"),
-            ("SŮNCE", "UNCES"),
-            ("MĚSTO", "STEMÓ"),
+            ("LÉTO", "TOLE"),
             ("TRÁVA", "VAART"),
-            ("CHLEB", "HCBLE"),
+            ("CHLEB", "LHCBE"),
             ("VODA", "ADOV"),
+            ("VÍTR", "RÍTV"),
+            ("SLOVO", "VOSLO"),
             ("MRAKY", "YAMRK"),
-            ("KŮRA", "URKA"),
-            ("VÍTR", "RIVT"),
-            ("OHEŇ", "HENÖ"),
-            ("ZÁPAD", "PADÁZ"),
-            ("VÝCHOD", "CCHODV"),
-            ("SEVER", "REVSÉ"),
-            ("SLANÝ", "NÁLSY"),
+            ("SLANÝ", "NASŁY"),
         ]
         
         self.current_pair = random.choice(self.word_pairs)
         self.original = self.current_pair[0]
         self.scrambled = list(self.current_pair[1])
-        self.answer = [""] * len(self.original)
+        self.answer = ""  # String místo seznamu
         self.used = [False] * len(self.scrambled)
     
     def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN:
+        if event.type == pygame.KEYDOWN:
+            # BACKSPACE = smazat poslední písmeno a vrátit do dostupných
+            if event.key == pygame.K_BACKSPACE:
+                if len(self.answer) > 0:
+                    # Najdi poslední písmeno v self.answer
+                    last_char = self.answer[-1]
+                    # Vrat ho do dostupných - označ jako nepoužité
+                    for i in range(len(self.scrambled) - 1, -1, -1):
+                        if self.scrambled[i] == last_char and self.used[i]:
+                            self.used[i] = False
+                            break
+                    # Odeber z odpovědi
+                    self.answer = self.answer[:-1]
+            # ENTER = ověřit odpověď
+            elif event.key == pygame.K_RETURN:
+                if self.answer.upper() == self.original:
+                    self.won = True
+                else:
+                    self.answer = ""
+                    self.used = [False] * len(self.scrambled)
+            # Psaní textu - přidej písmeno
+            elif event.unicode.isalpha():
+                char = event.unicode.upper()
+                # Zkontroluj, zda je písmeno ze scrambled a není ještě použito
+                if char in self.scrambled and len(self.answer) < len(self.original):
+                    # Najdi první nepoužívané výskyt písmena
+                    char_index = -1
+                    for i, letter in enumerate(self.scrambled):
+                        if letter == char and not self.used[i]:
+                            char_index = i
+                            break
+                    
+                    if char_index != -1:
+                        self.answer += char
+                        self.used[char_index] = True
+                        # Okamžitá kontrola výhry
+                        if self.answer == self.original:
+                            self.won = True
+        
+        elif event.type == pygame.MOUSEBUTTONDOWN:
             pos = event.pos
             
+            # Klikání na písmena
             for i in range(len(self.scrambled)):
                 if self.used[i]:
                     continue
                 x = 100 + i * 90
-                y = 300
+                y = 420
                 if pygame.Rect(x, y, 70, 70).collidepoint(pos):
-                    for j in range(len(self.answer)):
-                        if self.answer[j] == "":
-                            self.answer[j] = self.scrambled[i]
-                            self.used[i] = True
-                            self.check_win()
-                            return
-    
-    def check_win(self):
-        current = "".join(self.answer)
-        if current == self.original:
-            self.won = True
+                    if len(self.answer) < len(self.original):
+                        self.answer += self.scrambled[i]
+                        self.used[i] = True
+                        if self.answer == self.original:
+                            self.won = True
+                    return
+            
+            # Tlačítko SMAZAT
+            if pygame.Rect(SCREEN_WIDTH - 250, SCREEN_HEIGHT - 120, 200, 80).collidepoint(pos):
+                self.answer = ""
+                self.used = [False] * len(self.scrambled)
     
     def draw(self, screen):
         screen.fill(DARK_BLUE)
@@ -1665,21 +2053,31 @@ class WordUnscrambler(BaseGame):
         title = FONT_LARGE.render("SEŘAĎ SLOVO", True, CYAN)
         screen.blit(title, (SCREEN_WIDTH//2 - 140, 30))
         
-        instr1 = FONT_SMALL.render("Klikejte postupně na písmena v pořadí", True, YELLOW)
-        screen.blit(instr1, (SCREEN_WIDTH//2 - 250, 120))
+        instr1 = FONT_SMALL.render("Psej nebo klikej na písmena v správném pořadí", True, YELLOW)
+        screen.blit(instr1, (SCREEN_WIDTH//2 - 300, 120))
         
+        # Input box
+        answer_box_rect = pygame.Rect(SCREEN_WIDTH//2 - 250, 180, 500, 80)
+        pygame.draw.rect(screen, BLUE, answer_box_rect)
+        pygame.draw.rect(screen, CYAN, answer_box_rect, 3)
+        
+        # Vyplněná pole
         for i in range(len(self.original)):
-            x = 100 + i * 90
-            y = 200
-            color = GREEN if self.answer[i] != "" else BLUE
-            pygame.draw.rect(screen, color, pygame.Rect(x, y, 70, 70))
-            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 70, 70), 2)
+            x = SCREEN_WIDTH//2 - 240 + i * 95
+            y = 195
             
-            if self.answer[i]:
-                char_text = FONT_MEDIUM.render(self.answer[i], True, BLACK)
-                char_rect = char_text.get_rect(center=(x + 35, y + 35))
-                screen.blit(char_text, char_rect)
+            if i < len(self.answer):
+                pygame.draw.rect(screen, GREEN, pygame.Rect(x, y, 70, 70))
+                letter_text = FONT_MEDIUM.render(self.answer[i], True, BLACK)
+            else:
+                pygame.draw.rect(screen, (40, 40, 100), pygame.Rect(x, y, 70, 70))
+                letter_text = FONT_MEDIUM.render("_", True, WHITE)
+            
+            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 70, 70), 2)
+            letter_rect = letter_text.get_rect(center=(x + 35, y + 35))
+            screen.blit(letter_text, letter_rect)
         
+        # Dostupná písmena
         avail_text = FONT_SMALL.render("DOSTUPNÁ PÍSMENA:", True, CYAN)
         screen.blit(avail_text, (100, 350))
         
@@ -1691,12 +2089,21 @@ class WordUnscrambler(BaseGame):
             pygame.draw.rect(screen, BLUE, pygame.Rect(x, y, 70, 70))
             pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 70, 70), 2)
             
-            char_text = FONT_MEDIUM.render(char, True, BLACK)
+            char_text = FONT_MEDIUM.render(char, True, WHITE)
             char_rect = char_text.get_rect(center=(x + 35, y + 35))
             screen.blit(char_text, char_rect)
         
-        instr2 = FONT_SMALL.render("Slovo musí mít {} písmen".format(len(self.original)), True, WHITE)
-        screen.blit(instr2, (SCREEN_WIDTH//2 - 200, 700))
+        # Tlačítko SMAZAT
+        clear_btn_rect = pygame.Rect(SCREEN_WIDTH - 250, SCREEN_HEIGHT - 120, 200, 80)
+        pygame.draw.rect(screen, RED, clear_btn_rect)
+        pygame.draw.rect(screen, WHITE, clear_btn_rect, 2)
+        clear_text = FONT_SMALL.render("SMAZAT", True, BLACK)
+        clear_rect = clear_text.get_rect(center=clear_btn_rect.center)
+        screen.blit(clear_text, clear_rect)
+        
+        # Instrukce
+        instr2 = FONT_SMALL.render("ENTER: Ověř | BACKSPACE: Smazat poslední | KLIK na písmena", True, WHITE)
+        screen.blit(instr2, (SCREEN_WIDTH//2 - 350, 700))
     
     def get_hint(self):
         return f"Správné slovo: {self.original}"
@@ -2161,25 +2568,39 @@ class Hangman(BaseGame):
         
         wrong_text = FONT_MEDIUM.render(f"Chyby: {self.wrong}/{self.max_wrong}", True, RED)
         screen.blit(wrong_text, (SCREEN_WIDTH//2 - 150, 500))
+        
+        # OPRAVA: Zobraz slovo když prohraješ
+        if self.lost:
+            lost_text = FONT_LARGE.render(f"PROHRAUL! Slovo: {self.word}", True, RED)
+            screen.blit(lost_text, (SCREEN_WIDTH//2 - 300, 650))
     
     def get_hint(self):
         return f"Slovo: {self.word}"
 
 
 class ColorBlind(BaseGame):
-    """Najdi jinou barvu - stejná barva, jen jiný odstín"""
+    """Najdi jinou barvu - stejná barva, jen jiný odstín - VÍCE RUNDY A BAREV"""
     def __init__(self):
         super().__init__()
-        self.base_color = random.choice([RED, BLUE, YELLOW, GREEN])
+        self.total_rounds = 5  # Více rundy
+        self.current_round = 0
+        self.rounds_completed = 0
+        self.available_colors = [RED, BLUE, YELLOW, GREEN, CYAN]
+        self.generate_new_round()
+    
+    def generate_new_round(self):
+        """Generuj nové kolo s jinou barvou"""
+        self.base_color = random.choice(self.available_colors)
+        
         # Vytvoř podobný odstín - stejná barva, ale o něco světlejší/tmavší
-        if self.base_color == RED:
-            self.different_color = (200, 50, 50)  # Světlejší červená
-        elif self.base_color == BLUE:
-            self.different_color = (50, 100, 200)  # Světlejší modrá
-        elif self.base_color == YELLOW:
-            self.different_color = (200, 200, 100)  # Světlejší žlutá
-        else:  # GREEN
-            self.different_color = (100, 180, 100)  # Světlejší zelená
+        color_map = {
+            RED: (200, 50, 50),
+            BLUE: (50, 100, 200),
+            YELLOW: (200, 200, 100),
+            GREEN: (100, 180, 100),
+            CYAN: (50, 220, 220)
+        }
+        self.different_color = color_map[self.base_color]
         self.positions = list(range(16))
         self.different_pos = random.randint(0, 15)
         random.shuffle(self.positions)
@@ -2192,7 +2613,13 @@ class ColorBlind(BaseGame):
                 y = 250 + (i // 4) * 200
                 if pygame.Rect(x, y, 150, 150).collidepoint(pos):
                     if self.positions[i] == self.different_pos:
-                        self.won = True
+                        self.rounds_completed += 1
+                        if self.rounds_completed >= self.total_rounds:
+                            self.won = True
+                        else:
+                            # Další kolo
+                            self.current_round += 1
+                            self.generate_new_round()
                     else:
                         self.lost = True
                     break
@@ -2202,6 +2629,10 @@ class ColorBlind(BaseGame):
         title = FONT_LARGE.render("NAJDI ROZDÍL", True, CYAN)
         screen.blit(title, (SCREEN_WIDTH//2 - 150, 30))
         
+        # Počet rundy
+        round_text = FONT_MEDIUM.render(f"Kolo {self.rounds_completed + 1}/{self.total_rounds}", True, YELLOW)
+        screen.blit(round_text, (SCREEN_WIDTH//2 - 150, 100))
+        
         for i in range(16):
             x = 300 + (i % 4) * 200
             y = 250 + (i // 4) * 200
@@ -2210,7 +2641,7 @@ class ColorBlind(BaseGame):
             pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 150, 150), 2)
     
     def get_hint(self):
-        return "Najdi barvu která se liší!"
+        return f"Najdi jinou barvu! Kolo {self.rounds_completed + 1}/{self.total_rounds}"
 
 
 class MasterChallenge(BaseGame):
@@ -2475,6 +2906,8 @@ class RotatingImage(BaseGame):
     def __init__(self):
         super().__init__()
         self.shapes = ["kruh", "čtverec", "trojúhelník", "hvězda", "srdce"]
+        self.total_rounds = 5  # Více rundy
+        self.current_round = 0
         self.target_shape = random.choice(self.shapes)
         self.rotation = 0
         self.rotation_speed = 3
@@ -2516,25 +2949,31 @@ class RotatingImage(BaseGame):
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN:
             pos = event.pos
-            # Kliknutí POUZE na tlačítka s odpověďmi (ne na rotující tvar)
-            for i, shape in enumerate(["kruh", "čtverec", "trojúhelník"]):
-                x = 230 + i * 380
-                y = 600
-                # Větší klikatelná plocha
-                if pygame.Rect(x - 80, y - 40, 160, 80).collidepoint(pos):
+            # Kliknutí POUZE na veliké tlačítka s odpověďmi (ne na nadpisy/text)
+            shape_buttons = [
+                ("kruh", 150, 550, 250, 120),
+                ("čtverec", 650, 550, 250, 120),
+                ("trojúhelník", 1150, 550, 250, 120)
+            ]
+            
+            for shape, x, y, w, h in shape_buttons:
+                if pygame.Rect(x, y, w, h).collidepoint(pos):
                     if shape == self.target_shape:
+                        self.current_round += 1
                         self.correct_clicks += 1
-                        if self.correct_clicks >= 3:
+                        if self.current_round >= self.total_rounds:
                             self.won = True
+                        else:
+                            # Další kolo - nový tvar
+                            self.target_shape = random.choice(self.shapes)
                     else:
-                        if self.click_count > 0:
-                            self.click_count -= 1
+                        self.lost = True
     
     def update(self):
         self.rotation += self.rotation_speed
         self.timer += 1
-        if self.timer > 1800:  # 30 sekund
-            if self.correct_clicks >= 3:
+        if self.timer > 2400:  # 40 sekund pro více rundy
+            if self.current_round >= self.total_rounds:
                 self.won = True
             else:
                 self.lost = True
@@ -2545,25 +2984,33 @@ class RotatingImage(BaseGame):
         title = FONT_LARGE.render("ROZPOZNEJ TVAR", True, CYAN)
         screen.blit(title, (SCREEN_WIDTH//2 - 180, 30))
         
-        # Rotující tvar
-        self.draw_shape(screen, "kruh", SCREEN_WIDTH//2, 300, 60, self.rotation)
+        # Rotující tvar - uprostřed
+        self.draw_shape(screen, "kruh", SCREEN_WIDTH//2, 280, 80, self.rotation)
         
-        info = FONT_SMALL.render(f"Tvar se otáčí - rozpoznej jej! Správně: {self.correct_clicks}/3", True, YELLOW)
-        screen.blit(info, (SCREEN_WIDTH//2 - 250, 450))
+        # Počet rundy
+        round_text = FONT_MEDIUM.render(f"Kolo {self.current_round + 1}/{self.total_rounds}", True, YELLOW)
+        screen.blit(round_text, (SCREEN_WIDTH//2 - 150, 400))
         
-        # Tlačítka s odpověďmi - větší a čitelnější
-        for i, shape in enumerate(["kruh", "čtverec", "trojúhelník"]):
-            x = 230 + i * 380
-            y = 600
-            pygame.draw.rect(screen, BLUE, pygame.Rect(x - 80, y - 40, 160, 80))
-            pygame.draw.rect(screen, WHITE, pygame.Rect(x - 80, y - 40, 160, 80), 3)
+        info = FONT_SMALL.render(f"Tvar se otáčí - rozpoznej jej!", True, YELLOW)
+        screen.blit(info, (SCREEN_WIDTH//2 - 180, 460))
+        
+        # Velká tlačítka s odpověďmi - oddělená
+        shapes_info = [
+            ("kruh", 150, 550, 250, 120, RED),
+            ("čtverec", 650, 550, 250, 120, BLUE),
+            ("trojúhelník", 1150, 550, 250, 120, GREEN)
+        ]
+        
+        for shape, x, y, w, h, shape_color in shapes_info:
+            pygame.draw.rect(screen, BLUE, pygame.Rect(x, y, w, h))
+            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, w, h), 4)
             
-            text = FONT_SMALL.render(shape, True, WHITE)
-            text_rect = text.get_rect(center=(x, y))
+            text = FONT_MEDIUM.render(shape.upper(), True, WHITE)
+            text_rect = text.get_rect(center=(x + w//2, y + h//2))
             screen.blit(text, text_rect)
     
     def get_hint(self):
-        return f"Tvar se otáčí - jde o {self.target_shape}!"
+        return f"Tvar se otáčí - jde o {self.target_shape}! Kolo {self.current_round + 1}/{self.total_rounds}"
 
 
 class LaserMirrors(BaseGame):
@@ -2706,7 +3153,8 @@ class LaserMirrors(BaseGame):
                 tx, ty = self.target
                 self.laser_segments.append((tuple(pos), (tx, ty)))
                 
-                if self.reflection_count >= 1:
+                # Potřebuješ alespoň 2 odrazy pro výhru (místo 3)
+                if self.reflection_count >= 2:
                     self.won = True
                 break
             
@@ -2776,19 +3224,19 @@ class LaserMirrors(BaseGame):
             pygame.draw.line(screen, (100, 255, 255), p1, p2, 2)
         
         # Ukaž počet odrazů
-        refl_text = FONT_MEDIUM.render(f"Odrazy: {self.reflection_count}/3", True, 
-                                       GREEN if self.reflection_count >= 3 else YELLOW)
+        refl_text = FONT_MEDIUM.render(f"Odrazy: {self.reflection_count}/2", True, 
+                                       GREEN if self.reflection_count >= 2 else YELLOW)
         screen.blit(refl_text, (SCREEN_WIDTH//2 - 120, 100))
         
         if self.won:
             win_text = FONT_LARGE.render("TRESINK!!!", True, GREEN)
             screen.blit(win_text, (SCREEN_WIDTH//2 - 180, 200))
         
-        instr = FONT_SMALL.render("KLIKNI NA ZRCADLA (45 stupnu) - Potrebujes 3+ ODRAZY!", True, WHITE)
+        instr = FONT_SMALL.render("KLIKNI NA ZRCADLA (45 stupnu) - Potrebujes 2+ ODRAZY!", True, WHITE)
         screen.blit(instr, (SCREEN_WIDTH//2 - 320, 700))
     
     def get_hint(self):
-        return f"Otáčej zrcadla aby laser (zelený) dosáhl cíle (červený) - potřebuješ {3 - self.reflection_count} více odrazů!"
+        return f"Otáčej zrcadla aby laser (zelený) dosáhl cíle (červený) - potřebuješ {2 - self.reflection_count} více odrazů!"
 
 
 class FindDifferences(BaseGame):
@@ -2966,94 +3414,161 @@ class ColorMatch(BaseGame):
 
 
 class PipeRotate(BaseGame):
-    """Otáčení potrubí - propoj START a CÍL - OPRAVENÉ S VALIDACÍ PŘIPOJENÍ"""
+    """
+    Otáčení potrubí - propoj START (zelené) a CÍL (červené).
+    Validace: Musí existovat SPOJITÁ CESTA od START k END.
+    """
     
+    # Definice typů potrubí - které směry se otevírají
+    # Směry: 0=vpravo, 90=dolů, 180=vlevo, 270=nahoru
     PIPE_TYPES = {
-        "straight": [(0, 180)],  # Přímá linka - vždy opačné směry
-        "corner": [(0, 90)]  # Rohová - vždy kolmé směry
+        "straight": [(0, 180)],    # Vodorovné/svislé: opačné směry
+        "corner": [(0, 90)]         # L-tvar: kolmé směry
     }
     
     def __init__(self):
         super().__init__()
         self.grid_size = 5
         self.cell_size = 120
-        self.start_pos = (0, 0)
-        self.end_pos = (4, 4)
+        self.start_pos = (0, 0)     # Zelená - vlevo nahoře
+        self.end_pos = (4, 4)       # Červená - vpravo dole
         self.pipes = [[{"type": "straight", "rotation": 0} for _ in range(self.grid_size)] for _ in range(self.grid_size)]
         self.generate_pipes()
     
     def generate_pipes(self):
-        """Generuje náhodné potrubí"""
+        """
+        Generuje náhodné potrubí.
+        DŮLEŽITÉ: START a END pozice musí mít možné připojení!
+        """
         types = ["straight", "corner"]
+        
         for y in range(self.grid_size):
             for x in range(self.grid_size):
-                self.pipes[y][x] = {
-                    "type": random.choice(types),
-                    "rotation": random.randint(0, 3) * 90
-                }
+                # START (0,0): musí mít otevření doprava (0°) nebo dolů (90°)
+                if (y, x) == self.start_pos:
+                    # Pipe s pravým/dolním otevřením
+                    self.pipes[y][x] = {
+                        "type": "corner",
+                        "rotation": random.choice([0, 90, 180, 270])
+                    }
+                # END (4,4): musí mít otevření doleva (180°) nebo nahoru (270°)
+                elif (y, x) == self.end_pos:
+                    self.pipes[y][x] = {
+                        "type": "corner",
+                        "rotation": random.choice([0, 90, 180, 270])
+                    }
+                # ostatní buňky: kompletně náhodně
+                else:
+                    self.pipes[y][x] = {
+                        "type": random.choice(types),
+                        "rotation": random.randint(0, 3) * 90
+                    }
     
     def get_pipe_openings(self, pipe_type, rotation):
-        """Vrátí směry, kam se trubka připojuje (0=vpravo, 90=dolu, 180=vlevo, 270=nahoru)"""
+        """
+        Vrátí množinu směrů, kde má potrubí otevření.
+        
+        Směry:
+        - 0°   = vpravo (EAST)
+        - 90°  = dolů (SOUTH)
+        - 180° = vlevo (WEST)
+        - 270° = nahoru (NORTH)
+        
+        Příklady:
+        - straight (0°, 180°) + rotation 0° => {0°, 180°} (vodorovné)
+        - straight (0°, 180°) + rotation 90° => {90°, 270°} (svislé)
+        - corner (0°, 90°) + rotation 0° => {0°, 90°} (L-tvar: vpravo, dolů)
+        """
         if pipe_type not in self.PIPE_TYPES:
             return set()
+        
         base_openings = self.PIPE_TYPES[pipe_type]
-        pipe_dirs = set()
+        rotated_openings = set()
+        
         for opening_pair in base_openings:
             dir1 = (opening_pair[0] + rotation) % 360
             dir2 = (opening_pair[1] + rotation) % 360
-            pipe_dirs.add(dir1)
-            pipe_dirs.add(dir2)
-        return pipe_dirs
+            rotated_openings.add(dir1)
+            rotated_openings.add(dir2)
+        
+        return rotated_openings
     
-    def is_path_connected(self):
-        """Ověří propojení s kontrolou skutečných otvorů trubek"""
+    def get_connected_path(self):
+        """
+        Vrátí seznam všech pozic na SPOJITÉ CESTĚ od START k END.
+        Vrátí prázdný seznam pokud cesta neexistuje.
+        """
         from collections import deque
+        
+        DIRECTIONS = {
+            0: (0, 1),      # Vpravo (EAST)
+            90: (1, 0),     # Dolů (SOUTH)  
+            180: (0, -1),   # Vlevo (WEST)
+            270: (-1, 0)    # Nahoru (NORTH)
+        }
+        
+        OPPOSITE = {0: 180, 90: 270, 180: 0, 270: 90}
         
         queue = deque([self.start_pos])
         visited = {self.start_pos}
+        parent = {self.start_pos: None}
         
-        DIRECTIONS = {0: (1, 0), 90: (0, 1), 180: (-1, 0), 270: (0, -1)}
-        OPPOSITE = {0: 180, 90: 270, 180: 0, 270: 90}
-        
+        # BFS pro nalezení cesty
         while queue:
             y, x = queue.popleft()
+            current_pipe = self.pipes[y][x]
+            current_openings = self.get_pipe_openings(current_pipe["type"], current_pipe["rotation"])
             
             if (y, x) == self.end_pos:
-                return True
+                # Najdeme cestu - vy construct seznam od END zpět k START
+                path = []
+                current = (y, x)
+                while current is not None:
+                    path.insert(0, current)
+                    current = parent[current]
+                return path
             
-            pipe = self.pipes[y][x]
-            pipe_dirs = self.get_pipe_openings(pipe["type"], pipe["rotation"])
-            
-            for direction in pipe_dirs:
+            for direction in current_openings:
                 dy, dx = DIRECTIONS[direction]
                 next_y, next_x = y + dy, x + dx
                 
                 if 0 <= next_y < self.grid_size and 0 <= next_x < self.grid_size:
                     if (next_y, next_x) not in visited:
-                        next_pipe = self.pipes[next_y][next_x]
-                        next_dirs = self.get_pipe_openings(next_pipe["type"], next_pipe["rotation"])
+                        neighbor_pipe = self.pipes[next_y][next_x]
+                        neighbor_openings = self.get_pipe_openings(neighbor_pipe["type"], neighbor_pipe["rotation"])
                         
-                        # Ověř, že následující trubka se připojuje zpět (opačný směr)
-                        if OPPOSITE[direction] in next_dirs:
+                        opposite_direction = OPPOSITE[direction]
+                        if opposite_direction in neighbor_openings:
                             visited.add((next_y, next_x))
+                            parent[(next_y, next_x)] = (y, x)
                             queue.append((next_y, next_x))
         
-        return False
+        return []
+    
+    def is_path_connected(self):
+        """Ověřuje, zda existuje spojitá cesta od START k END"""
+        return len(self.get_connected_path()) > 0
     
     def handle_event(self, event):
+        """Zpracuj klik na potrubí - otočení o 90° a validace"""
         if event.type == pygame.MOUSEBUTTONDOWN:
             pos = event.pos
             for y in range(self.grid_size):
                 for x in range(self.grid_size):
                     px = 300 + x * self.cell_size
                     py = 200 + y * self.cell_size
+                    
                     if pygame.Rect(px, py, self.cell_size - 10, self.cell_size - 10).collidepoint(pos):
+                        # Otočení trubky o 90°
                         self.pipes[y][x]["rotation"] = (self.pipes[y][x]["rotation"] + 90) % 360
-                        if self.is_path_connected():
+                        
+                        # Kontrola cesty
+                        path = self.get_connected_path()
+                        if len(path) > 0 and self.end_pos in path:
                             self.won = True
     
-    def draw_pipe_shape(self, screen, cx, cy, pipe_type, rotation):
-        """Kreslí tvar potrubí - přímé nebo rohové"""
+    def draw_pipe_shape(self, screen, cx, cy, pipe_type, rotation, color=YELLOW):
+        """Kreslí tvar potrubí - přímé nebo rohové, s danou barvou"""
         center_x = cx + self.cell_size // 2
         center_y = cy + self.cell_size // 2
         pipe_size = 35
@@ -3061,32 +3576,32 @@ class PipeRotate(BaseGame):
         if pipe_type == "straight":
             # Přímé potrubí - vodorovné nebo svislé
             if rotation in [0, 180]:  # Vodorovné
-                pygame.draw.line(screen, YELLOW, (center_x - pipe_size, center_y), 
+                pygame.draw.line(screen, color, (center_x - pipe_size, center_y), 
                                 (center_x + pipe_size, center_y), 12)
             else:  # Svislé (90, 270)
-                pygame.draw.line(screen, YELLOW, (center_x, center_y - pipe_size), 
+                pygame.draw.line(screen, color, (center_x, center_y - pipe_size), 
                                 (center_x, center_y + pipe_size), 12)
         else:  # corner
             # Rohové potrubí - L-tvar
             if rotation == 0:
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
+                pygame.draw.line(screen, color, (center_x, center_y), 
                                 (center_x + pipe_size, center_y), 12)
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
+                pygame.draw.line(screen, color, (center_x, center_y), 
                                 (center_x, center_y - pipe_size), 12)
             elif rotation == 90:
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
+                pygame.draw.line(screen, color, (center_x, center_y), 
                                 (center_x + pipe_size, center_y), 12)
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
+                pygame.draw.line(screen, color, (center_x, center_y), 
                                 (center_x, center_y + pipe_size), 12)
             elif rotation == 180:
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
+                pygame.draw.line(screen, color, (center_x, center_y), 
                                 (center_x - pipe_size, center_y), 12)
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
+                pygame.draw.line(screen, color, (center_x, center_y), 
                                 (center_x, center_y + pipe_size), 12)
             else:  # 270
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
+                pygame.draw.line(screen, color, (center_x, center_y), 
                                 (center_x - pipe_size, center_y), 12)
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
+                pygame.draw.line(screen, color, (center_x, center_y), 
                                 (center_x, center_y - pipe_size), 12)
     
     def draw(self, screen):
@@ -3094,6 +3609,10 @@ class PipeRotate(BaseGame):
         
         title = FONT_LARGE.render("POTRUBI", True, CYAN)
         screen.blit(title, (SCREEN_WIDTH//2 - 150, 20))
+        
+        # Zjisti cestu - které trubky se mají zelenout
+        path = self.get_connected_path()
+        path_set = set(path)
         
         for y in range(self.grid_size):
             for x in range(self.grid_size):
@@ -3103,9 +3622,10 @@ class PipeRotate(BaseGame):
                 pygame.draw.rect(screen, BLUE, pygame.Rect(px, py, self.cell_size - 10, self.cell_size - 10))
                 pygame.draw.rect(screen, WHITE, pygame.Rect(px, py, self.cell_size - 10, self.cell_size - 10), 2)
                 
-                # Kresli tvar potrubí
+                # Kreslí trubku - zelenou pokud je na cestě, jinak žlutou
                 pipe = self.pipes[y][x]
-                self.draw_pipe_shape(screen, px, py, pipe["type"], pipe["rotation"])
+                pipe_color = GREEN if (y, x) in path_set else YELLOW
+                self.draw_pipe_shape(screen, px, py, pipe["type"], pipe["rotation"], pipe_color)
                 
                 # Start a cíl
                 if (y, x) == self.start_pos:
@@ -3115,13 +3635,19 @@ class PipeRotate(BaseGame):
                     pygame.draw.circle(screen, RED, (px + self.cell_size//2, py + self.cell_size//2), 18)
                     pygame.draw.circle(screen, WHITE, (px + self.cell_size//2, py + self.cell_size//2), 18, 2)
         
-        # Ukaž, jestli je cesta hotová
-        if self.is_path_connected():
-            status = FONT_MEDIUM.render("SPOJENO!!!", True, GREEN)
+        # Ukaž status
+        if len(path) > 0 and self.end_pos in path_set:
+            status = FONT_MEDIUM.render("SPOJENO - VYHRA!!!", True, GREEN)
+            screen.blit(status, (SCREEN_WIDTH//2 - 150, 700))
+        elif len(path) > 0:
+            status = FONT_MEDIUM.render(f"Cesta: {len(path)} polí | Pokračuj!", True, YELLOW)
+            screen.blit(status, (SCREEN_WIDTH//2 - 200, 700))
+        else:
+            status = FONT_MEDIUM.render("Žádná cesta...", True, RED)
             screen.blit(status, (SCREEN_WIDTH//2 - 120, 700))
         
-        instr = FONT_SMALL.render("KLIKNI NA POTRUBI - Otáčej aby se ZELENA propojila s CERVENOU!", True, WHITE)
-        screen.blit(instr, (SCREEN_WIDTH//2 - 350, 650))
+        instr = FONT_SMALL.render("KLIKNI NA POTRUBI - Otáčej aby se ZELENA cesta spojila s CERVENOU!", True, WHITE)
+        screen.blit(instr, (SCREEN_WIDTH//2 - 400, 650))
     
     def get_hint(self):
         return "Otáčej potrubí - musí být skutečně připojena!"
@@ -3276,6 +3802,48 @@ class ComingSoonGame(BaseGame):
     
     def get_hint(self):
         return "Tento level zatím není dostupný - Coming Soon!"
+
+
+class BlankGame(BaseGame):
+    """
+    Level 20 - Coming Soon.
+    
+    LEVEL 20 COMING SOON:
+    Tato třída zobrazuje "Coming soon..." zprávu pro level 20.
+    Hra bude v příští verzi.
+    """
+    def __init__(self):
+        super().__init__()
+        self.timer = 0
+    
+    def handle_event(self, event):
+        """Všechny eventy jsou ignorovány"""
+        pass
+    
+    def update(self):
+        self.timer += 1
+    
+    def draw(self, screen):
+        """Zobrazuje Coming soon zprávu"""
+        screen.fill(DARK_BLUE)
+        
+        # Nadpis
+        title = FONT_LARGE.render("🚀 COMING SOON 🚀", True, CYAN)
+        title_rect = title.get_rect(center=(screen.get_width()//2, 200))
+        screen.blit(title, title_rect)
+        
+        # Hlavní zpráva
+        msg = FONT_MEDIUM.render("Level 20 bude přidán v příští verzi!", True, WHITE)
+        msg_rect = msg.get_rect(center=(screen.get_width()//2, 400))
+        screen.blit(msg, msg_rect)
+        
+        # Verze info
+        version_text = FONT_SMALL.render(f"MindLock! {GAME_VERSION}", True, GRAY)
+        version_rect = version_text.get_rect(center=(screen.get_width()//2, 600))
+        screen.blit(version_text, version_rect)
+    
+    def get_hint(self):
+        return "Level bude k dispozici v příští verzi"
 
 
 if __name__ == "__main__":
