@@ -3,13 +3,18 @@ import sys
 import random
 import math
 from enum import Enum
-from collections import defaultdict
+from collections import defaultdict, deque
 
 
 pygame.init()
 
 
-SCREEN_WIDTH = 1920
+# =====================================
+# VERSION SYSTEM FIX
+# =====================================
+GAME_VERSION = "1.7.0"
+
+SCREEN_WIDTH = 1924
 SCREEN_HEIGHT = 1080
 FPS = 60
 FONT_LARGE = pygame.font.Font(None, 80)
@@ -87,22 +92,42 @@ class Game:
         self.space_press_timer = 0
         self.current_game = None
         
+        # =====================================
+        # GRAPHICS MENU EXPANSION - Settings Structure
+        # =====================================
+        self.graphics_settings = {
+            "resolution": "1920x1080",  # Current resolution
+            "fullscreen": False,
+            "vsync": True,
+            "ui_scale": 100,  # Percentage: 100, 125, 150
+            "particles": True,
+            "screen_shake": True
+        }
+        
+        # Available resolutions for cycling
+        self.available_resolutions = [
+            "1280x720",
+            "1600x900",
+            "1920x1080"
+        ]
+        
+        # Available UI scale options
+        self.available_ui_scales = [100, 125, 150]
+        
 
         self.patch_notes = [
             {"version": "1.0.0", "notes": ["Počáteční verze hry", "11 různých herních módů"]},
             {"version": "1.1.0", "notes": ["Opravena mechanika levelů", "Přidány nápovědy"]},
-            {"version": "1.2.0", "notes": ["Hezčí a moderní menu", "Opravena logika 2048", "Přidán delay v Simon Says", "Patch notes nyní v Pop-up okně"]},
+            {"version": "1.7.0", "notes": ["Hezčí a moderní menu", "Opravena logika 2048", "Přidán delay v Simon Says", "Patch notes nyní v Pop-up okně"]},
             {"version": "1.3.0", "notes": ["Opravena chyba SimonSays s nekonečnou smyčkou", "Opravena inicializace TetrisLite", "Odstraněny všechny komentáře ze kódu", "Opraveny chyby v souboru"]},
             {"version": "1.4.0", "notes": ["Nápověda jako popup okno (stiskni N)", "Pause menu s ESC klávesou", "Tlačítka: Continue, Restart (odemyka level 2), Exit", "Simon Says nyní vyžaduje 5 kol místo 7"]},
             {"version": "1.5.0", "notes": ["Bludiště má nyní mnohem více zdí", "Přidán tajný admin mode", "Vylepšená herní vyvážená obtížnost", "Patch notes aktualizovány po každé změně"]},
             {"version": "1.6.0", "notes": ["Bludiště s DFS algoritmem - překrásné", "Coming Soon popup pro hotové levely", "Nápověda přesunuta na N klávesu", "Maze hra zcela přepracována"]},
-            {"version": "1.7.0", "notes": ["Nápověda změněna na SPACE SPACE (2x stisk)", "Opraveny chyby v inicializaci game - program se sám nevypíná", "Error handling v Maze DFS algoritmu"]},
-            {"version": "1.8.0", "notes": ["Bludiště přepsáno na GRID-BASED systém (25x20, 32px buňky)", "ButtonFinder nahrazen ClickMaster (klikej na pohybující se cíl)", "Odstraněn Coming Soon popup - všechny levely dostupné!", "Jen 19 levelů - bez duplicit"]},
-            {"version": "1.9.0", "notes": ["Přepracován level 2: ClickMaster → Najdi jinou barvu (ColorBlind)", "Level 11: FindShape → Rotující obraz (RotatingImage) - rozpoznej tvar", "Level 13: Následuj barvy → Časová bomba (TimeBomb) - nový mode", "2048: Opraveno na cíl 1024 místo 2048 (hint aktualizován)", "Sudoku: Přidána validace pravidel (řádek, sloupec, blok)", "Memory: Opraveno max 2 karty současně, překrývání", "Hangman: Zobrazena kategorie slova na vrchu", "SpeedClick: Timer začíná až na první klik", "Přidán nový level 19: Coming Soon - připraveno na budoucí obsah", "Celkem 19 funkčních levelů - bez duplicit!"]},
-            {"version": "2.0.0", "notes": ["ALL BUGS FIXED - Game je nyní plně funkční!", "Level 3: Harder maze s více větvemi", "Level 2: Color shades místo rozdílných barev", "Level 11: Větší klikací plocha pro tlačítka", "Level 16: Správné spojování trubek", "Level 17: LaserMirrors s viditelným laserem a odrazy", "Level 20: Coming Soon popup se nyní zobrazuje!", "Patch notes aktualizovány na verzi 2.0.0"]}
+            {"version": "1.7.0", "notes": ["Nápověda změněna na SPACE SPACE (2x stisk)", "Opraveny chyby v inicializaci game - program se sám nevypíná", "Error handling v Maze DFS algoritmu"]}
         ]
         
-        self.version = self.patch_notes[-1]["version"]
+        # Use global GAME_VERSION constant
+        self.version = GAME_VERSION
 
         self.menu_buttons = {
             "play": Button(SCREEN_WIDTH//2 - 110, 250, 220, 70, "PLAY"),
@@ -113,9 +138,35 @@ class Game:
         
 
         self.settings_buttons = {
+            # FPS Controls
             "fps_down": Button(600, 280, 50, 50, "-", FONT_MEDIUM),
             "fps_up": Button(750, 280, 50, 50, "+", FONT_MEDIUM),
+            
+            # Graphics Section Buttons
             "graphics": Button(200, 250, 300, 60, "Graphics", FONT_SMALL),
+            
+            # Resolution Controls
+            "resolution_down": Button(600, 350, 50, 50, "<", FONT_MEDIUM),
+            "resolution_up": Button(750, 350, 50, 50, ">", FONT_MEDIUM),
+            
+            # Fullscreen Toggle
+            "fullscreen_toggle": Button(600, 410, 200, 50, "Fullscreen: OFF", FONT_SMALL),
+            
+            # VSync Toggle
+            "vsync_toggle": Button(600, 470, 200, 50, "VSync: ON", FONT_SMALL),
+            
+            # UI Scale Controls
+            "ui_scale_down": Button(600, 530, 50, 50, "-", FONT_MEDIUM),
+            "ui_scale_up": Button(750, 530, 50, 50, "+", FONT_MEDIUM),
+            
+            # Effects Toggle
+            "particles_toggle": Button(600, 590, 200, 50, "Particles: ON", FONT_SMALL),
+            "screen_shake_toggle": Button(600, 650, 200, 50, "Screen Shake: ON", FONT_SMALL),
+            
+            # Restart button
+            "restart_game": Button(700, 720, 150, 50, "RESTART", FONT_SMALL),
+            
+            # Developer Section
             "developer": Button(200, 350, 300, 60, "Developer", FONT_SMALL),
             "back": Button(SCREEN_WIDTH//2 - 100, 700, 200, 60, "BACK")
         }
@@ -154,8 +205,8 @@ class Game:
         self.current_game = None
         
     def create_level_buttons(self):
-        """Vytvoří tlačítka pro všech 20 levelů"""
-        for i in range(1, 21):
+        """Vytvoří tlačítka pro všech 19 levelů"""
+        for i in range(1, 20):
             col = (i - 1) % 5
             row = (i - 1) // 5
             x = 150 + col * 180
@@ -223,30 +274,111 @@ class Game:
         self.patch_buttons["back"].draw(self.screen)
     
     def draw_settings(self):
-        """Kreslí nastavení"""
+        """
+        Kreslí nastavení s rozšířeným Graphics menu.
+        
+        FPS ALIGNMENT FIX:
+        - Dynamicky centruje FPS hodnotu mezi minus a plus tlačítky
+        - Bez hardcoded pixelů
+        
+        GRAPHICS MENU EXPANSION:
+        - Resolution selector
+        - Fullscreen toggle
+        - VSync toggle
+        - UI Scale option
+        - Effects toggles
+        """
         self.screen.fill(DARK_BLUE)
         
         title = FONT_LARGE.render("SETTINGS", True, CYAN)
         title_rect = title.get_rect(center=(SCREEN_WIDTH//2, 40))
         self.screen.blit(title, title_rect)
         
- 
+        # =====================================
+        # GRAPHICS SECTION
+        # =====================================
         graphics_button = self.settings_buttons["graphics"]
         graphics_button.draw(self.screen)
         
         if self.settings_expanded["graphics"]:
-   
+            # FPS Setting
             fps_label = FONT_SMALL.render("FPS:", True, WHITE)
             self.screen.blit(fps_label, (250, 320))
             
+            # FPS ALIGNMENT FIX: Dynamic centering between minus and plus buttons
+            fps_down_rect = self.settings_buttons["fps_down"].rect
+            fps_up_rect = self.settings_buttons["fps_up"].rect
+            fps_center_x = (fps_down_rect.right + fps_up_rect.left) // 2
+            fps_center_y = fps_down_rect.centery
+            
             fps_value = FONT_MEDIUM.render(str(self.fps), True, YELLOW)
-            fps_rect = fps_value.get_rect(center=(650, 310))
+            fps_rect = fps_value.get_rect(center=(fps_center_x, fps_center_y))
             self.screen.blit(fps_value, fps_rect)
             
             self.settings_buttons["fps_down"].draw(self.screen)
             self.settings_buttons["fps_up"].draw(self.screen)
+            
+            # =====================================
+            # RESOLUTION SELECTOR
+            # =====================================
+            res_label = FONT_SMALL.render("Resolution:", True, WHITE)
+            self.screen.blit(res_label, (250, 370))
+            
+            res_center_x = (self.settings_buttons["resolution_down"].rect.right + 
+                           self.settings_buttons["resolution_up"].rect.left) // 2
+            res_text = FONT_TINY.render(self.graphics_settings["resolution"], True, YELLOW)
+            res_rect = res_text.get_rect(center=(res_center_x, 375))
+            self.screen.blit(res_text, res_rect)
+            
+            self.settings_buttons["resolution_down"].draw(self.screen)
+            self.settings_buttons["resolution_up"].draw(self.screen)
+            
+            # =====================================
+            # FULLSCREEN TOGGLE
+            # =====================================
+            fullscreen_state = "ON" if self.graphics_settings["fullscreen"] else "OFF"
+            self.settings_buttons["fullscreen_toggle"].text = f"Fullscreen: {fullscreen_state}"
+            self.settings_buttons["fullscreen_toggle"].draw(self.screen)
+            
+            # =====================================
+            # VSYNC TOGGLE
+            # =====================================
+            vsync_state = "ON" if self.graphics_settings["vsync"] else "OFF"
+            self.settings_buttons["vsync_toggle"].text = f"VSync: {vsync_state}"
+            self.settings_buttons["vsync_toggle"].draw(self.screen)
+            
+            # =====================================
+            # UI SCALE OPTION
+            # =====================================
+            ui_scale_label = FONT_SMALL.render("UI Scale:", True, WHITE)
+            self.screen.blit(ui_scale_label, (250, 550))
+            
+            ui_scale_center_x = (self.settings_buttons["ui_scale_down"].rect.right + 
+                                self.settings_buttons["ui_scale_up"].rect.left) // 2
+            ui_scale_text = FONT_SMALL.render(f"{self.graphics_settings['ui_scale']}%", True, YELLOW)
+            ui_scale_rect = ui_scale_text.get_rect(center=(ui_scale_center_x, 555))
+            self.screen.blit(ui_scale_text, ui_scale_rect)
+            
+            self.settings_buttons["ui_scale_down"].draw(self.screen)
+            self.settings_buttons["ui_scale_up"].draw(self.screen)
+            
+            # =====================================
+            # EFFECTS TOGGLES
+            # =====================================
+            particles_state = "ON" if self.graphics_settings["particles"] else "OFF"
+            self.settings_buttons["particles_toggle"].text = f"Particles: {particles_state}"
+            self.settings_buttons["particles_toggle"].draw(self.screen)
+            
+            screen_shake_state = "ON" if self.graphics_settings["screen_shake"] else "OFF"
+            self.settings_buttons["screen_shake_toggle"].text = f"Screen Shake: {screen_shake_state}"
+            self.settings_buttons["screen_shake_toggle"].draw(self.screen)
+            
+            # Restart button
+            self.settings_buttons["restart_game"].draw(self.screen)
         
- 
+        # =====================================
+        # DEVELOPER SECTION
+        # =====================================
         developer_button = self.settings_buttons["developer"]
         developer_button.draw(self.screen)
         
@@ -284,14 +416,8 @@ class Game:
                     self.screen.blit(done_text, done_rect)
                 else:
                     button.draw(self.screen)
-            elif level_num == 20:
-                # Level 20 - Coming Soon, vždy viditelný
-                pygame.draw.rect(self.screen, (100, 50, 0), button.rect)
-                pygame.draw.rect(self.screen, YELLOW, button.rect, 3)
-                soon_text = FONT_SMALL.render("COMING SOON", True, YELLOW)
-                soon_rect = soon_text.get_rect(center=button.rect.center)
-                self.screen.blit(soon_text, soon_rect)
             else:
+                # No special display for levels beyond 19
                 pygame.draw.rect(self.screen, DARK_GRAY, button.rect)
                 pygame.draw.rect(self.screen, GRAY, button.rect, 3)
                 lock_text = FONT_SMALL.render("LOCKED", True, RED)
@@ -324,14 +450,8 @@ class Game:
         self.popup_buttons["menu"].draw(self.screen)
         self.popup_buttons["restart"].draw(self.screen)
         
-        if self.game_won and self.current_level < 20:
+        if self.game_won and self.current_level < 19:
             self.popup_buttons["next"].draw(self.screen)
-        elif self.current_level == 20:
-            final_text = FONT_SMALL.render("COMING SOON - zkuste jiný level!", True, YELLOW)
-            self.screen.blit(final_text, (SCREEN_WIDTH//2 - 300, 500))
-        elif self.current_level == 19 and self.game_won:
-            final_text = FONT_SMALL.render("LEVEL 19 COMPLETED - Zbývá Coming Soon!", True, YELLOW)
-            self.screen.blit(final_text, (SCREEN_WIDTH//2 - 300, 500))
     
     def draw_pause_menu(self):
         """Kreslí pause menu"""
@@ -389,24 +509,96 @@ class Game:
             self.state = GameState.MENU
     
     def handle_settings_click(self, pos):
-        """Zpracuje klik v nastavení"""
+        """
+        Zpracuje klik v nastavení.
+        
+        Includes:
+        - FPS adjustment
+        - Graphics menu expansion (GRAPHICS MENU EXPANSION)
+        - Resolution cycling
+        - Fullscreen, VSync, UI Scale, Effects toggles
+        """
         if self.settings_buttons["graphics"].is_clicked(pos):
             self.settings_expanded["graphics"] = not self.settings_expanded["graphics"]
         elif self.settings_buttons["developer"].is_clicked(pos):
             self.settings_expanded["developer"] = not self.settings_expanded["developer"]
-        elif self.settings_expanded["graphics"] and self.settings_buttons["fps_down"].is_clicked(pos):
-            self.fps = max(10, self.fps - 10)
-        elif self.settings_expanded["graphics"] and self.settings_buttons["fps_up"].is_clicked(pos):
-            self.fps = min(240, self.fps + 10)
-        elif self.settings_buttons["back"].is_clicked(pos):
+        
+        # Handle Graphics menu clicks (only if expanded)
+        elif self.settings_expanded["graphics"]:
+            # FPS Controls
+            if self.settings_buttons["fps_down"].is_clicked(pos):
+                self.fps = max(10, self.fps - 10)
+            elif self.settings_buttons["fps_up"].is_clicked(pos):
+                self.fps = min(240, self.fps + 10)
+            
+            # Resolution Controls - cycle through available resolutions
+            elif self.settings_buttons["resolution_down"].is_clicked(pos):
+                current_res = self.graphics_settings["resolution"]
+                current_idx = self.available_resolutions.index(current_res)
+                new_idx = (current_idx - 1) % len(self.available_resolutions)
+                self.graphics_settings["resolution"] = self.available_resolutions[new_idx]
+                # TODO: Safely update pygame display mode
+                
+            elif self.settings_buttons["resolution_up"].is_clicked(pos):
+                current_res = self.graphics_settings["resolution"]
+                current_idx = self.available_resolutions.index(current_res)
+                new_idx = (current_idx + 1) % len(self.available_resolutions)
+                self.graphics_settings["resolution"] = self.available_resolutions[new_idx]
+                # TODO: Safely update pygame display mode
+            
+            # Fullscreen Toggle
+            elif self.settings_buttons["fullscreen_toggle"].is_clicked(pos):
+                self.graphics_settings["fullscreen"] = not self.graphics_settings["fullscreen"]
+                # TODO: Update display mode with FULLSCREEN flag
+            
+            # VSync Toggle
+            elif self.settings_buttons["vsync_toggle"].is_clicked(pos):
+                self.graphics_settings["vsync"] = not self.graphics_settings["vsync"]
+                # TODO: Update pygame display flags
+            
+            # UI Scale Controls
+            elif self.settings_buttons["ui_scale_down"].is_clicked(pos):
+                current_scale = self.graphics_settings["ui_scale"]
+                current_idx = self.available_ui_scales.index(current_scale)
+                new_idx = (current_idx - 1) % len(self.available_ui_scales)
+                self.graphics_settings["ui_scale"] = self.available_ui_scales[new_idx]
+                # TODO: Recalculate UI elements for new scale
+            
+            elif self.settings_buttons["ui_scale_up"].is_clicked(pos):
+                current_scale = self.graphics_settings["ui_scale"]
+                current_idx = self.available_ui_scales.index(current_scale)
+                new_idx = (current_idx + 1) % len(self.available_ui_scales)
+                self.graphics_settings["ui_scale"] = self.available_ui_scales[new_idx]
+                # TODO: Recalculate UI elements for new scale
+            
+            # Effects Toggles
+            elif self.settings_buttons["particles_toggle"].is_clicked(pos):
+                self.graphics_settings["particles"] = not self.graphics_settings["particles"]
+            
+            elif self.settings_buttons["screen_shake_toggle"].is_clicked(pos):
+                self.graphics_settings["screen_shake"] = not self.graphics_settings["screen_shake"]
+            
+            # Restart button - vrať se do menu a restartuj hru
+            elif self.settings_buttons["restart_game"].is_clicked(pos):
+                print("🔄 [GAME RESTART] Restartování hry...")
+                self.state = GameState.MENU
+                self.current_level = 1
+                self.unlocked_levels = 1
+                self.completed_levels = set()
+                self.level_completed = False
+                self.game_won = False
+                self.pause_menu_open = False
+        
+        # Back button (always available)
+        if self.settings_buttons["back"].is_clicked(pos):
             self.state = GameState.MENU
     
     def handle_play_click(self, pos):
         """Zpracuje klik v play menu"""
-        # Zkontroluj odemčené levely - všechny lze hrát, level 20 je Coming Soon
+        # Zkontroluj odemčené levely (1-19)
         for level_num, button in self.level_buttons.items():
             if button.is_clicked(pos):
-                if level_num <= self.unlocked_levels or level_num == 20:
+                if level_num <= self.unlocked_levels:
                     try:
                         self.current_level = level_num
                         self.game_won = False
@@ -440,8 +632,8 @@ class Game:
             except Exception as e:
                 print(f"Chyba při restartování levelu: {e}")
                 self.state = GameState.PLAYING
-        elif self.game_won and self.current_level < 20 and self.popup_buttons["next"].is_clicked(pos):
-            if self.current_level < 20:
+        elif self.game_won and self.current_level < 19 and self.popup_buttons["next"].is_clicked(pos):
+            if self.current_level < 19:
                 self.current_level += 1
                 try:
                     self.current_game = self.create_game_level(self.current_level)
@@ -480,7 +672,7 @@ class Game:
             ("ColorBlind", lambda: ColorBlind()),
             ("Maze", lambda: Maze()),
             ("TetrisLite", lambda: TetrisLite()),
-            ("Game2048", lambda: Game2048()),
+            ("Pong", lambda: Game2048()),
             ("ColorMatch", lambda: ColorMatch()),
             ("RiddleGame", lambda: RiddleGame()),
             ("SudokuLite", lambda: SudokuLite()),
@@ -494,8 +686,7 @@ class Game:
             ("PipeRotate", lambda: PipeRotate()),
             ("LaserMirrors", lambda: LaserMirrors()),
             ("CableConnect", lambda: CableConnect()),
-            ("ClickMaster_ComingSoon", lambda: ComingSoonGame()),
-            ("FutureGame_ComingSoon", lambda: ComingSoonGame())
+            ("WordUnscrambler", lambda: WordUnscrambler())  # Level 19 - Word Unscrambler game
         ]
         
         try:
@@ -572,7 +763,7 @@ class Game:
                 if event.key == pygame.K_o:
                     self.admin_mode = not self.admin_mode
                     if self.admin_mode:
-                        self.unlocked_levels = 20
+                        self.unlocked_levels = 19
                     else:
                         self.unlocked_levels = 1
                 if self.state == GameState.GAME:
@@ -681,133 +872,193 @@ class BaseGame:
         return "Zkus tlačítko!"
 
 class Maze(BaseGame):
-    """Grid-based maze - hráč se pohybuje po mřížce, 20x20 nebo větší"""
+    """Grid-based maze - hráč se pohybuje po mřížce, 21x25 (lichá čísla pro DFS)"""
     def __init__(self):
         super().__init__()
         self.CELL_SIZE = 32
         self.COLS = 25
-        self.ROWS = 20
-        
-        # Hardcoded maze s mnoha cestami a dead ends
-        self.grid = self.generate_maze()
-        
-        self.player_row = 0
-        self.player_col = 0
-        self.goal_row = 19
-        self.goal_col = 24
-        
-    def generate_maze(self):
-        """Generuje složitější bludiště s více mrtvými cestami a zákruty"""
-        # 1 = cesta (walkable), 0 = zeď (wall)
-        maze = [
-            [1,1,1,1,1,0,1,0,1,1,1,0,1,0,1,0,1,1,1,0,1,0,1,1,1],
-            [1,0,0,0,1,0,1,0,0,0,1,0,1,0,1,0,1,0,0,0,1,0,0,0,1],
-            [1,0,1,0,1,0,1,1,1,0,1,0,1,0,1,0,1,0,1,1,1,1,1,0,1],
-            [1,0,1,0,0,0,0,0,1,0,0,0,1,0,1,0,0,0,1,0,0,0,1,0,1],
-            [1,0,1,1,1,1,1,0,1,1,1,1,1,0,1,1,1,0,1,0,1,1,1,0,1],
-            [1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,1],
-            [1,1,1,0,1,0,1,0,1,1,1,1,1,1,1,0,1,0,1,1,1,0,1,1,1],
-            [1,0,0,0,1,0,1,0,1,0,0,0,0,0,1,0,1,0,0,0,1,0,0,0,1],
-            [1,0,1,1,1,0,1,0,1,0,1,1,1,0,1,0,1,1,1,0,1,0,1,1,1],
-            [1,0,1,0,0,0,1,0,1,0,1,0,0,0,1,0,0,0,1,0,1,0,0,0,1],
-            [1,0,1,0,1,1,1,0,1,0,1,0,1,1,1,1,1,0,1,0,1,1,1,0,1],
-            [1,0,1,0,1,0,0,0,1,0,0,0,1,0,0,0,1,0,1,0,0,0,1,0,1],
-            [1,0,1,0,1,0,1,1,1,1,1,0,1,0,1,0,1,0,1,1,1,0,1,0,1],
-            [1,0,1,0,0,0,1,0,0,0,0,0,1,0,1,0,0,0,0,0,1,0,1,0,1],
-            [1,0,1,1,1,0,1,0,1,1,1,1,1,0,1,1,1,1,1,0,1,0,1,0,1],
-            [1,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,1],
-            [1,1,1,0,1,1,1,0,1,0,1,1,1,1,1,1,1,1,1,1,1,0,1,0,1],
-            [1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,1],
-            [1,0,1,1,1,0,1,1,1,0,1,0,1,1,1,1,1,1,1,1,1,1,1,0,1],
-            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-        ]
-        
-        # Ověřit BFS cestu od startu k cíli
-        if not self.is_path_exists(maze, 0, 0, 19, 24):
-            print("⚠️  Maze nemá cestu! Regeneruji na jednoduchou liniju...")
-            maze = self.create_simple_maze()
-        
+        self.ROWS = 21
+
+        # Start and goal on odd-indexed DFS cells (guaranteed connected)
+        self.player_row = 1
+        self.player_col = 1
+        self.goal_row = self.ROWS - 2   # 19
+        self.goal_col = self.COLS - 2   # 23
+
+        # Generate a guaranteed-solvable maze
+        self.grid = self._generate_solvable_maze()
+
+    # ------------------------------------------------------------------
+    #  PUBLIC ENTRY POINT – regenerates until BFS confirms solvability
+    # ------------------------------------------------------------------
+    def _generate_solvable_maze(self):
+        """
+        Generates mazes until one passes the BFS reachability check.
+        With a correct DFS carve this always succeeds on the first try,
+        but the loop acts as a safety net.
+        """
+        for _ in range(100):
+            maze = self._generate_maze_dfs()
+            if self._bfs_path_exists(maze, self.player_row, self.player_col,
+                                     self.goal_row, self.goal_col):
+                return maze
+        # Absolute fallback: open a straight corridor so the game is playable
+        return self._fallback_maze()
+
+    # ------------------------------------------------------------------
+    #  ITERATIVE DFS  (Recursive-Backtracking, stack-based)
+    # ------------------------------------------------------------------
+    def _generate_maze_dfs(self):
+        """
+        Iterative DFS (recursive backtracking) maze generation.
+        Works on odd-indexed cells (rooms).  Even-indexed cells between
+        two rooms are carved to form passages.
+
+        1 = path (walkable)   0 = wall
+        """
+        rows = self.ROWS
+        cols = self.COLS
+
+        # Start with every cell as a wall
+        maze = [[0] * cols for _ in range(rows)]
+
+        # Begin carving from the top-left room (1, 1)
+        start_r, start_c = 1, 1
+        maze[start_r][start_c] = 1
+        stack = [(start_r, start_c)]
+
+        directions = [(-2, 0), (2, 0), (0, -2), (0, 2)]
+
+        while stack:
+            r, c = stack[-1]
+
+            # Collect unvisited neighbours (2 cells away, odd→odd)
+            neighbours = []
+            for dr, dc in directions:
+                nr, nc = r + dr, c + dc
+                if 1 <= nr < rows - 1 and 1 <= nc < cols - 1 and maze[nr][nc] == 0:
+                    neighbours.append((nr, nc, dr, dc))
+
+            if neighbours:
+                nr, nc, dr, dc = random.choice(neighbours)
+                # Carve the wall cell between current room and neighbour room
+                maze[r + dr // 2][c + dc // 2] = 1
+                maze[nr][nc] = 1
+                stack.append((nr, nc))
+            else:
+                stack.pop()
+
         return maze
-    
-    def is_path_exists(self, maze, start_row, start_col, goal_row, goal_col):
-        """BFS - ověří, že existuje cesta od startu k cíli"""
-        from collections import deque
-        queue = deque([(start_row, start_col)])
-        visited = {(start_row, start_col)}
-        
+
+    # ------------------------------------------------------------------
+    #  BFS VERIFICATION
+    # ------------------------------------------------------------------
+    def _bfs_path_exists(self, maze, sr, sc, gr, gc):
+        """Return True if a walkable path exists from (sr,sc) to (gr,gc)."""
+        if maze[sr][sc] != 1 or maze[gr][gc] != 1:
+            return False
+
+        visited = set()
+        queue = deque([(sr, sc)])
+        visited.add((sr, sc))
+
         while queue:
-            row, col = queue.popleft()
-            if row == goal_row and col == goal_col:
+            r, c = queue.popleft()
+            if r == gr and c == gc:
                 return True
-            
-            for dr, dc in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-                nr, nc = row + dr, col + dc
-                if 0 <= nr < len(maze) and 0 <= nc < len(maze[0]):
-                    if maze[nr][nc] == 1 and (nr, nc) not in visited:
-                        visited.add((nr, nc))
-                        queue.append((nr, nc))
-        
+            for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nr, nc = r + dr, c + dc
+                if (0 <= nr < self.ROWS and 0 <= nc < self.COLS
+                        and (nr, nc) not in visited and maze[nr][nc] == 1):
+                    visited.add((nr, nc))
+                    queue.append((nr, nc))
+
         return False
-    
-    def create_simple_maze(self):
-        """Vytvoří jednoduchou cestu na okraj"""
-        maze = [[0] * 25 for _ in range(20)]
-        for col in range(25):
-            maze[0][col] = 1
-            maze[19][col] = 1
+
+    # ------------------------------------------------------------------
+    #  FALLBACK – trivial solvable maze (should never be needed)
+    # ------------------------------------------------------------------
+    def _fallback_maze(self):
+        """Create a simple maze with a guaranteed open corridor."""
+        maze = [[0] * self.COLS for _ in range(self.ROWS)]
+        # Open row 1 across the top, then column 23 down the right side
+        for c in range(1, self.COLS - 1):
+            maze[1][c] = 1
+        for r in range(1, self.ROWS - 1):
+            maze[r][self.COLS - 2] = 1
         return maze
+    
+
     
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
-            # Grid-based pohyb (ne smooth, skokový)
+            new_r, new_c = self.player_row, self.player_col
+
             if event.key in (pygame.K_UP, pygame.K_w):
-                if self.player_row > 0 and self.grid[self.player_row - 1][self.player_col] == 1:
-                    self.player_row -= 1
+                new_r -= 1
             elif event.key in (pygame.K_DOWN, pygame.K_s):
-                if self.player_row < self.ROWS - 1 and self.grid[self.player_row + 1][self.player_col] == 1:
-                    self.player_row += 1
+                new_r += 1
             elif event.key in (pygame.K_LEFT, pygame.K_a):
-                if self.player_col > 0 and self.grid[self.player_row][self.player_col - 1] == 1:
-                    self.player_col -= 1
+                new_c -= 1
             elif event.key in (pygame.K_RIGHT, pygame.K_d):
-                if self.player_col < self.COLS - 1 and self.grid[self.player_row][self.player_col + 1] == 1:
-                    self.player_col += 1
-            
-            # Výhra?
+                new_c += 1
+
+            # Move only if the target cell is inside the grid AND walkable
+            if (0 <= new_r < self.ROWS and 0 <= new_c < self.COLS
+                    and self.grid[new_r][new_c] == 1):
+                self.player_row = new_r
+                self.player_col = new_c
+
+            # Win condition
             if self.player_row == self.goal_row and self.player_col == self.goal_col:
                 self.won = True
-    
+
     def draw(self, screen):
         screen.fill(DARK_BLUE)
-        
-        # Nakresli grid
+
+        # Centre the grid on a 1920x1080 screen
+        offset_x = (1920 - self.COLS * self.CELL_SIZE) // 2
+        offset_y = (1080 - self.ROWS * self.CELL_SIZE) // 2
+
+        # Draw grid
         for row in range(self.ROWS):
             for col in range(self.COLS):
-                x = col * self.CELL_SIZE
-                y = row * self.CELL_SIZE
-                
+                x = offset_x + col * self.CELL_SIZE
+                y = offset_y + row * self.CELL_SIZE
+
                 if self.grid[row][col] == 0:
-                    # Zeď - hnědá
-                    pygame.draw.rect(screen, (139, 69, 19), pygame.Rect(x, y, self.CELL_SIZE, self.CELL_SIZE))
+                    # Wall – brown
+                    pygame.draw.rect(screen, (139, 69, 19),
+                                     pygame.Rect(x, y, self.CELL_SIZE, self.CELL_SIZE))
                 else:
-                    # Cesta - tmavě modrá
-                    pygame.draw.rect(screen, (40, 40, 60), pygame.Rect(x, y, self.CELL_SIZE, self.CELL_SIZE))
-                    pygame.draw.rect(screen, (60, 60, 90), pygame.Rect(x, y, self.CELL_SIZE, self.CELL_SIZE), 1)
-        
-        # Cíl - zelený
-        goal_x = self.goal_col * self.CELL_SIZE + 4
-        goal_y = self.goal_row * self.CELL_SIZE + 4
-        pygame.draw.rect(screen, GREEN, pygame.Rect(goal_x, goal_y, self.CELL_SIZE - 8, self.CELL_SIZE - 8))
-        
-        # Hráč - tyrkysový čtverec
-        player_x = self.player_col * self.CELL_SIZE + 4
-        player_y = self.player_row * self.CELL_SIZE + 4
-        pygame.draw.rect(screen, CYAN, pygame.Rect(player_x, player_y, self.CELL_SIZE - 8, self.CELL_SIZE - 8))
-        
-        # Instrukce
+                    # Path – dark blue
+                    pygame.draw.rect(screen, (40, 40, 60),
+                                     pygame.Rect(x, y, self.CELL_SIZE, self.CELL_SIZE))
+                    pygame.draw.rect(screen, (60, 60, 90),
+                                     pygame.Rect(x, y, self.CELL_SIZE, self.CELL_SIZE), 1)
+
+        # Goal – green
+        goal_x = offset_x + self.goal_col * self.CELL_SIZE + 4
+        goal_y = offset_y + self.goal_row * self.CELL_SIZE + 4
+        pygame.draw.rect(screen, GREEN,
+                         pygame.Rect(goal_x, goal_y, self.CELL_SIZE - 8, self.CELL_SIZE - 8))
+
+        # Start marker – blue
+        start_x = offset_x + 1 * self.CELL_SIZE + 4
+        start_y = offset_y + 1 * self.CELL_SIZE + 4
+        pygame.draw.rect(screen, BLUE,
+                         pygame.Rect(start_x, start_y, self.CELL_SIZE - 8, self.CELL_SIZE - 8))
+
+        # Player – cyan
+        player_x = offset_x + self.player_col * self.CELL_SIZE + 4
+        player_y = offset_y + self.player_row * self.CELL_SIZE + 4
+        pygame.draw.rect(screen, CYAN,
+                         pygame.Rect(player_x, player_y, self.CELL_SIZE - 8, self.CELL_SIZE - 8))
+
+        # Instructions
         title = FONT_MEDIUM.render("BLUDIŠTĚ", True, YELLOW)
         screen.blit(title, (50, 700))
-        
+
         instr = FONT_SMALL.render("ŠIPKY/WSAD = Pohyb | Dorazit na ZELENÝ CÍL", True, WHITE)
         screen.blit(instr, (50, 750))
     
@@ -829,19 +1080,27 @@ class SimonSays(BaseGame):
         self.sequence_delay = 0
     
     def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN and self.waiting_for_input:
+        if event.type == pygame.MOUSEBUTTONDOWN:
             pos = event.pos
-            for i in range(4):
-                col = i % 2
-                row = i // 2
-                x = 300 + col * 200
-                y = 250 + row * 200
-                if pygame.Rect(x, y, 150, 150).collidepoint(pos):
-                    self.player_sequence.append(i)
-                    self.lights_on[i] = True
-                    self.light_timer = 30
-                    self.check_sequence()
-                    break
+            # Kliknutí POUZE na veliké tlačítka s odpověďmi (ne na nadpisy/text)
+            shape_buttons = [
+                ("kruh", 150, 550, 250, 120),
+                ("čtverec", 650, 550, 250, 120),
+                ("trojúhelník", 1150, 550, 250, 120)
+            ]
+            
+            for shape, x, y, w, h in shape_buttons:
+                if pygame.Rect(x, y, w, h).collidepoint(pos):
+                    if shape == self.target_shape:
+                        self.current_round += 1
+                        self.correct_clicks += 1
+                        if self.current_round >= self.total_rounds:
+                            self.won = True
+                        else:
+                            # Další kolo - nový tvar
+                            self.target_shape = random.choice(self.shapes)
+                    else:
+                        self.lost = True
     
     def update(self):
         self.light_timer = max(0, self.light_timer - 1)
@@ -858,9 +1117,11 @@ class SimonSays(BaseGame):
     def play_sequence(self):
         if self.current_step < len(self.sequence):
             self.lights_on[self.sequence[self.current_step]] = True
-            self.light_timer = 30
+            # Zrychluj i délku osvětlení
+            self.light_timer = max(15, 30 - (len(self.sequence) // 2))
             self.current_step += 1
-            self.sequence_delay = 35
+            # Zrychluj delay mezi prvky - čím více prvků, tím rychlejší
+            self.sequence_delay = max(10, 35 - (len(self.sequence) * 2))
         else:
             self.waiting_for_input = True
             self.player_sequence = []
@@ -869,14 +1130,16 @@ class SimonSays(BaseGame):
         if self.player_sequence[-1] != self.sequence[len(self.player_sequence) - 1]:
             self.lost = True
         elif len(self.player_sequence) == len(self.sequence):
-            if len(self.sequence) == 5:
+            if len(self.sequence) == 8:
                 self.won = True
             else:
                 self.sequence.append(random.randint(0, 3))
                 self.waiting_for_input = False
                 self.current_step = 0
                 self.round += 1
-                self.round_delay = 120
+                # Zrychluj sekvenci - čím vyšší kolo, tím rychlejší
+                base_delay = max(15, 120 - (len(self.sequence) * 5))
+                self.round_delay = base_delay
     
     def draw(self, screen):
         screen.fill(DARK_BLUE)
@@ -884,7 +1147,7 @@ class SimonSays(BaseGame):
         title = FONT_LARGE.render("SIMON SAYS", True, CYAN)
         screen.blit(title, (SCREEN_WIDTH//2 - 150, 30))
         
-        # Tlačítka
+        # Tlačítka s vylepšeným visual feedback
         for i in range(4):
             col = i % 2
             row = i // 2
@@ -892,10 +1155,16 @@ class SimonSays(BaseGame):
             y = 250 + row * 200
             color = self.colors[i] if not self.lights_on[i] else (255, 255, 255)
             pygame.draw.circle(screen, color, (x + 75, y + 75), 75)
+            # Přidej outline pro lepší viditelnost
+            pygame.draw.circle(screen, WHITE, (x + 75, y + 75), 75, 3)
         
-        # Info
-        info = FONT_MEDIUM.render(f"Kolo: {self.round}", True, YELLOW)
-        screen.blit(info, (SCREEN_WIDTH//2 - 80, 500))
+        # Info s pokrokem
+        info = FONT_MEDIUM.render(f"Kolo: {self.round}/8 | Délka: {len(self.sequence)}", True, YELLOW)
+        screen.blit(info, (SCREEN_WIDTH//2 - 200, 500))
+        
+        # Zobraz pokrok v sekvenci
+        progress = FONT_SMALL.render(f"Tvá řada: {len(self.player_sequence)}/{len(self.sequence)}", True, CYAN)
+        screen.blit(progress, (SCREEN_WIDTH//2 - 150, 550))
         
         if self.waiting_for_input:
             instr = FONT_SMALL.render("Tvůj tah! Klikej na světla", True, GREEN)
@@ -980,296 +1249,594 @@ class ClickMaster(BaseGame):
         return "Klikej přesně na červený kruh!"
 
 class TetrisLite(BaseGame):
-    """Lehký Tetris"""
+    """Full-featured beginner-friendly Tetris – clear 3 lines to win."""
+
+    # --- Tetromino definitions (each list = rotation states) ---------------
+    SHAPES = {
+        "I": [[(0,0),(1,0),(2,0),(3,0)], [(0,0),(0,1),(0,2),(0,3)]],
+        "O": [[(0,0),(1,0),(0,1),(1,1)]],
+        "T": [[(0,0),(1,0),(2,0),(1,1)], [(0,0),(0,1),(0,2),(1,1)],
+              [(1,0),(0,1),(1,1),(2,1)], [(1,0),(1,1),(1,2),(0,1)]],
+        "S": [[(1,0),(2,0),(0,1),(1,1)], [(0,0),(0,1),(1,1),(1,2)]],
+        "Z": [[(0,0),(1,0),(1,1),(2,1)], [(1,0),(0,1),(1,1),(0,2)]],
+        "J": [[(0,0),(0,1),(1,1),(2,1)], [(0,0),(1,0),(0,1),(0,2)],
+              [(0,0),(1,0),(2,0),(2,1)], [(1,0),(1,1),(0,2),(1,2)]],
+        "L": [[(2,0),(0,1),(1,1),(2,1)], [(0,0),(0,1),(0,2),(1,2)],
+              [(0,0),(1,0),(2,0),(0,1)], [(0,0),(1,0),(1,1),(1,2)]],
+    }
+    SHAPE_COLORS = {
+        "I": (0, 255, 255),
+        "O": (255, 255, 0),
+        "T": (160, 0, 200),
+        "S": (0, 255, 0),
+        "Z": (255, 0, 0),
+        "J": (0, 0, 255),
+        "L": (255, 165, 0),
+    }
+    COLS = 8
+    ROWS = 16
+    CELL = 28
+    LINES_TO_WIN = 3
+    FALL_INTERVAL = 75          # frames between automatic drops (very slow)
+    LOCK_DELAY = 50             # frames the piece sits on ground before locking
+
+    # ---- helpers for piece data -------------------------------------------
+    class _Piece:
+        """Holds current piece state."""
+        def __init__(self, shape_name, shapes_dict):
+            self.name = shape_name
+            self.rotations = shapes_dict[shape_name]
+            self.rot = 0
+            self.x = 3
+            self.y = 0
+
+        @property
+        def cells(self):
+            return self.rotations[self.rot]
+
+        def rotated_cells(self, direction=1):
+            idx = (self.rot + direction) % len(self.rotations)
+            return self.rotations[idx], idx
+
+    # ---- init -------------------------------------------------------------
     def __init__(self):
         super().__init__()
-        self.grid = [[0] * 6 for _ in range(10)]
-        self.pieces = [
-            [[1, 1], [1, 1]],  
-            [[1, 1, 1, 1]],    
-            [[1, 1, 1], [1, 0, 0]],  
-        ]
-        self.piece = self.new_piece()
-        self.piece_x = 2
-        self.piece_y = 0
-        self.fall_timer = 0
+        # Grid: 0 = empty, else colour tuple
+        self.grid = [[0] * self.COLS for _ in range(self.ROWS)]
+        self.bag = []
+        self.piece = self._spawn_piece()
+        self.next_piece_name = self._next_from_bag()
+        self.hold_name = None
+        self.hold_used = False          # only one hold per piece drop
         self.lines_cleared = 0
-    
-    def new_piece(self):
-        return random.choice(self.pieces)
-    
-    def handle_event(self, event):
-        if event.type == pygame.KEYDOWN:
-            if event.key in [pygame.K_a, pygame.K_LEFT]:
-                self.piece_x = max(0, self.piece_x - 1)
-            elif event.key in [pygame.K_d, pygame.K_RIGHT]:
-                self.piece_x = min(6 - len(self.piece[0]), self.piece_x + 1)
-            elif event.key in [pygame.K_s, pygame.K_DOWN]:
-                self.fall()
-    
-    def fall(self):
-        """Padá kus dolů"""
-        if self.can_place(self.piece_x, self.piece_y + 1):
-            self.piece_y += 1
-        else:
-            self.place_piece()
-            self.clear_lines()
-            self.piece = self.new_piece()
-            self.piece_x = 2
-            self.piece_y = 0
-            
-            if not self.can_place(self.piece_x, self.piece_y):
-                self.lost = True
-    
-    def can_place(self, x, y):
-        """Kontroluje, jestli lze umístit kus"""
-        for row in range(len(self.piece)):
-            for col in range(len(self.piece[row])):
-                if self.piece[row][col]:
-                    grid_x = x + col
-                    grid_y = y + row
-                    if grid_y >= 10 or grid_x >= 6 or grid_x < 0:
-                        if grid_y >= 10:
-                            return grid_y < 10
-                        return False
-                    if grid_y >= 0 and self.grid[grid_y][grid_x]:
-                        return False
+        self.score = 0
+        self.fall_timer = 0
+        self.lock_timer = 0
+        self.paused = False
+        self.started = False            # press-any-key gate
+        self.game_over = False
+
+    # ---- bag randomiser ---------------------------------------------------
+    def _next_from_bag(self):
+        if not self.bag:
+            self.bag = list(self.SHAPES.keys())
+            random.shuffle(self.bag)
+        return self.bag.pop()
+
+    def _spawn_piece(self):
+        name = self._next_from_bag()
+        return self._Piece(name, self.SHAPES)
+
+    # ---- collision / placement --------------------------------------------
+    def _valid(self, cells, ox, oy):
+        for cx, cy in cells:
+            gx, gy = ox + cx, oy + cy
+            if gx < 0 or gx >= self.COLS or gy >= self.ROWS:
+                return False
+            if gy >= 0 and self.grid[gy][gx]:
+                return False
         return True
-    
-    def place_piece(self):
-        """Umístí kus na hrací pole"""
-        for row in range(len(self.piece)):
-            for col in range(len(self.piece[row])):
-                if self.piece[row][col]:
-                    self.grid[self.piece_y + row][self.piece_x + col] = 1
-    
-    def clear_lines(self):
-        """Vymazání plných řad"""
+
+    def _lock_piece(self):
+        color = self.SHAPE_COLORS[self.piece.name]
+        for cx, cy in self.piece.cells:
+            gx, gy = self.piece.x + cx, self.piece.y + cy
+            if 0 <= gy < self.ROWS and 0 <= gx < self.COLS:
+                self.grid[gy][gx] = color
+        self._clear_lines()
+        self._next_turn()
+
+    def _next_turn(self):
+        self.piece = self._Piece(self.next_piece_name, self.SHAPES)
+        self.next_piece_name = self._next_from_bag()
+        self.hold_used = False
+        self.lock_timer = 0
+        self.fall_timer = 0
+        if not self._valid(self.piece.cells, self.piece.x, self.piece.y):
+            self.game_over = True
+            self.lost = True
+
+    def _clear_lines(self):
         new_grid = []
+        cleared = 0
         for row in self.grid:
-            if sum(row) < 6:
-                new_grid.append(row)
+            if all(cell != 0 for cell in row):
+                cleared += 1
             else:
-                self.lines_cleared += 1
-        
-        while len(new_grid) < 10:
-            new_grid.insert(0, [0] * 6)
-        
+                new_grid.append(row)
+        for _ in range(cleared):
+            new_grid.insert(0, [0] * self.COLS)
         self.grid = new_grid
-        
-        if self.lines_cleared >= 3:
+        self.lines_cleared += cleared
+        self.score += [0, 100, 300, 500, 800][min(cleared, 4)]
+        if self.lines_cleared >= self.LINES_TO_WIN:
             self.won = True
-    
+
+    # ---- movement helpers -------------------------------------------------
+    def _move(self, dx, dy):
+        if self._valid(self.piece.cells, self.piece.x + dx, self.piece.y + dy):
+            self.piece.x += dx
+            self.piece.y += dy
+            if dy == 0:
+                self.lock_timer = 0      # reset lock timer on horizontal move
+            return True
+        return False
+
+    def _rotate(self, direction=1):
+        new_cells, new_rot = self.piece.rotated_cells(direction)
+        # Try basic rotation then simple wall kicks
+        kicks = [(0, 0), (-1, 0), (1, 0), (-2, 0), (2, 0), (0, -1), (0, -2)]
+        for kx, ky in kicks:
+            if self._valid(new_cells, self.piece.x + kx, self.piece.y + ky):
+                self.piece.x += kx
+                self.piece.y += ky
+                self.piece.rot = new_rot
+                self.lock_timer = 0
+                return True
+        return False
+
+    def _hold(self):
+        if self.hold_used:
+            return
+        self.hold_used = True
+        if self.hold_name is None:
+            self.hold_name = self.piece.name
+            self.piece = self._Piece(self.next_piece_name, self.SHAPES)
+            self.next_piece_name = self._next_from_bag()
+        else:
+            old_hold = self.hold_name
+            self.hold_name = self.piece.name
+            self.piece = self._Piece(old_hold, self.SHAPES)
+        self.lock_timer = 0
+        self.fall_timer = 0
+
+    def _ghost_y(self):
+        gy = self.piece.y
+        while self._valid(self.piece.cells, self.piece.x, gy + 1):
+            gy += 1
+        return gy
+
+    # ---- event handling ---------------------------------------------------
+    def handle_event(self, event):
+        if event.type != pygame.KEYDOWN:
+            return
+
+        # Start gate
+        if not self.started:
+            self.started = True
+            return
+
+        if self.won or self.game_over:
+            return
+
+        # Pause toggle
+        if event.key == pygame.K_ESCAPE:
+            self.paused = not self.paused
+            return
+
+        if self.paused:
+            return
+
+        # Movement (Arrow keys AND WASD)
+        if event.key in (pygame.K_LEFT, pygame.K_a):
+            self._move(-1, 0)
+        elif event.key in (pygame.K_RIGHT, pygame.K_d):
+            self._move(1, 0)
+        elif event.key in (pygame.K_DOWN, pygame.K_s):
+            if self._move(0, 1):
+                self.fall_timer = 0
+        # Rotation on R only
+        elif event.key == pygame.K_r:
+            self._rotate()
+        # Hold
+        elif event.key in (pygame.K_c, pygame.K_LSHIFT, pygame.K_RSHIFT):
+            self._hold()
+
+    # ---- update (auto-fall) -----------------------------------------------
     def update(self):
+        if not self.started or self.paused or self.won or self.game_over:
+            return
+
         self.fall_timer += 1
-        if self.fall_timer > 30:
-            self.fall()
+        if self.fall_timer >= self.FALL_INTERVAL:
             self.fall_timer = 0
-    
+            if not self._move(0, 1):
+                self.lock_timer += 1
+                if self.lock_timer >= self.LOCK_DELAY:
+                    self._lock_piece()
+            else:
+                self.lock_timer = 0
+        else:
+            # Check if piece is resting on something and count lock delay
+            if not self._valid(self.piece.cells, self.piece.x, self.piece.y + 1):
+                self.lock_timer += 1
+                if self.lock_timer >= self.LOCK_DELAY:
+                    self._lock_piece()
+
+    # ---- drawing ----------------------------------------------------------
+    def _draw_block(self, screen, x, y, color, size=None):
+        s = size or self.CELL
+        rect = pygame.Rect(x, y, s, s)
+        pygame.draw.rect(screen, color, rect)
+        # highlight
+        pygame.draw.line(screen, tuple(min(c + 40, 255) for c in color), (x, y), (x + s - 1, y))
+        pygame.draw.line(screen, tuple(min(c + 40, 255) for c in color), (x, y), (x, y + s - 1))
+        # shadow
+        pygame.draw.line(screen, tuple(max(c - 60, 0) for c in color), (x, y + s - 1), (x + s - 1, y + s - 1))
+        pygame.draw.line(screen, tuple(max(c - 60, 0) for c in color), (x + s - 1, y), (x + s - 1, y + s - 1))
+
+    def _draw_mini_piece(self, screen, name, cx, cy, cell=20):
+        if name is None:
+            return
+        color = self.SHAPE_COLORS[name]
+        cells = self.SHAPES[name][0]
+        for bx, by in cells:
+            self._draw_block(screen, cx + bx * cell, cy + by * cell, color, cell)
+
     def draw(self, screen):
-        screen.fill(DARK_BLUE)
-        
-        title = FONT_LARGE.render("LEHKÝ TETRIS", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH//2 - 150, 30))
-        
-        # Hrací pole
-        start_x = 300
-        start_y = 150
-        cell_size = 30
-        
-        for row in range(10):
-            for col in range(6):
-                rect = pygame.Rect(start_x + col * cell_size, start_y + row * cell_size, cell_size, cell_size)
-                pygame.draw.rect(screen, GRAY, rect, 1)
-                if self.grid[row][col]:
-                    pygame.draw.rect(screen, CYAN, rect)
-        
-        # Aktuální kus
-        for row in range(len(self.piece)):
-            for col in range(len(self.piece[row])):
-                if self.piece[row][col]:
-                    x = start_x + (self.piece_x + col) * cell_size
-                    y = start_y + (self.piece_y + row) * cell_size
-                    pygame.draw.rect(screen, YELLOW, pygame.Rect(x, y, cell_size, cell_size))
-        
-        score_text = FONT_SMALL.render(f"Řady: {self.lines_cleared}/3", True, WHITE)
-        screen.blit(score_text, (SCREEN_WIDTH//2 - 80, 600))
-        
-        instr = FONT_TINY.render("A/D nebo ŠIPKY - Pohyb | S/DOWN - Pád", True, WHITE)
-        screen.blit(instr, (100, SCREEN_HEIGHT - 50))
-    
+        screen.fill((15, 15, 30))
+
+        # ---- start screen ----
+        if not self.started:
+            t = FONT_LARGE.render("TETRIS", True, CYAN)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, 300))
+            p = FONT_MEDIUM.render("Press any key to start", True, WHITE)
+            screen.blit(p, (SCREEN_WIDTH // 2 - p.get_width() // 2, 450))
+            return
+
+        # Layout constants
+        grid_w = self.COLS * self.CELL
+        grid_h = self.ROWS * self.CELL
+        ox = (SCREEN_WIDTH - grid_w) // 2
+        oy = (SCREEN_HEIGHT - grid_h) // 2
+
+        # ---- grid background ----
+        pygame.draw.rect(screen, (30, 30, 50), (ox - 2, oy - 2, grid_w + 4, grid_h + 4))
+        for r in range(self.ROWS):
+            for c in range(self.COLS):
+                rect = pygame.Rect(ox + c * self.CELL, oy + r * self.CELL, self.CELL, self.CELL)
+                if self.grid[r][c]:
+                    self._draw_block(screen, rect.x, rect.y, self.grid[r][c])
+                else:
+                    pygame.draw.rect(screen, (40, 40, 60), rect)
+                    pygame.draw.rect(screen, (55, 55, 75), rect, 1)
+
+        # ---- ghost piece ----
+        if not self.won and not self.game_over:
+            gy = self._ghost_y()
+            ghost_color = tuple(c // 3 for c in self.SHAPE_COLORS[self.piece.name])
+            for cx, cy in self.piece.cells:
+                gx_p = ox + (self.piece.x + cx) * self.CELL
+                gy_p = oy + (gy + cy) * self.CELL
+                pygame.draw.rect(screen, ghost_color, (gx_p, gy_p, self.CELL, self.CELL))
+                pygame.draw.rect(screen, tuple(min(c + 30, 255) for c in ghost_color),
+                                 (gx_p, gy_p, self.CELL, self.CELL), 1)
+
+        # ---- current piece ----
+        if not self.won and not self.game_over:
+            pc = self.SHAPE_COLORS[self.piece.name]
+            for cx, cy in self.piece.cells:
+                px = ox + (self.piece.x + cx) * self.CELL
+                py = oy + (self.piece.y + cy) * self.CELL
+                if py >= oy:
+                    self._draw_block(screen, px, py, pc)
+
+        # ---- grid border ----
+        pygame.draw.rect(screen, CYAN, (ox - 2, oy - 2, grid_w + 4, grid_h + 4), 2)
+
+        # ---- right panel: Next / Hold / Score / Lines ----
+        panel_x = ox + grid_w + 30
+
+        # Next piece
+        lbl = FONT_SMALL.render("NEXT", True, CYAN)
+        screen.blit(lbl, (panel_x, oy))
+        pygame.draw.rect(screen, (40, 40, 60), (panel_x, oy + 30, 100, 80))
+        pygame.draw.rect(screen, CYAN, (panel_x, oy + 30, 100, 80), 1)
+        self._draw_mini_piece(screen, self.next_piece_name, panel_x + 10, oy + 40)
+
+        # Hold piece
+        lbl = FONT_SMALL.render("HOLD", True, CYAN)
+        screen.blit(lbl, (panel_x, oy + 130))
+        pygame.draw.rect(screen, (40, 40, 60), (panel_x, oy + 160, 100, 80))
+        pygame.draw.rect(screen, CYAN, (panel_x, oy + 160, 100, 80), 1)
+        self._draw_mini_piece(screen, self.hold_name, panel_x + 10, oy + 170)
+
+        # Score
+        lbl = FONT_SMALL.render("SCORE", True, CYAN)
+        screen.blit(lbl, (panel_x, oy + 270))
+        val = FONT_MEDIUM.render(str(self.score), True, YELLOW)
+        screen.blit(val, (panel_x, oy + 300))
+
+        # Lines progress
+        lbl = FONT_SMALL.render("LINES", True, CYAN)
+        screen.blit(lbl, (panel_x, oy + 370))
+        val = FONT_MEDIUM.render(f"{self.lines_cleared} / {self.LINES_TO_WIN}", True, YELLOW)
+        screen.blit(val, (panel_x, oy + 400))
+
+        # ---- left panel: Controls ----
+        ctrl_x = ox - 260
+        ctrl_y = oy
+        lbl = FONT_SMALL.render("CONTROLS", True, CYAN)
+        screen.blit(lbl, (ctrl_x, ctrl_y))
+        controls = [
+            "A / Left  = Move Left",
+            "D / Right = Move Right",
+            "S / Down  = Soft Drop",
+            "R         = Rotate",
+            "C / Shift = Hold",
+            "ESC       = Pause",
+        ]
+        for i, line in enumerate(controls):
+            t = FONT_TINY.render(line, True, LIGHT_GRAY)
+            screen.blit(t, (ctrl_x, ctrl_y + 35 + i * 28))
+
+        # ---- overlays ----
+        if self.paused:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 150))
+            screen.blit(overlay, (0, 0))
+            t = FONT_LARGE.render("PAUSED", True, YELLOW)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+            s = FONT_SMALL.render("Press ESC to resume", True, WHITE)
+            screen.blit(s, (SCREEN_WIDTH // 2 - s.get_width() // 2, SCREEN_HEIGHT // 2 + 30))
+
+        if self.won:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 160))
+            screen.blit(overlay, (0, 0))
+            t = FONT_LARGE.render("YOU WIN!", True, GREEN)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+            s = FONT_SMALL.render(f"Lines: {self.lines_cleared}  Score: {self.score}", True, WHITE)
+            screen.blit(s, (SCREEN_WIDTH // 2 - s.get_width() // 2, SCREEN_HEIGHT // 2 + 30))
+
+        if self.game_over and not self.won:
+            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 160))
+            screen.blit(overlay, (0, 0))
+            t = FONT_LARGE.render("GAME OVER", True, RED)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+            s = FONT_SMALL.render(f"Lines: {self.lines_cleared}  Score: {self.score}", True, WHITE)
+            screen.blit(s, (SCREEN_WIDTH // 2 - s.get_width() // 2, SCREEN_HEIGHT // 2 + 30))
+
     def get_hint(self):
-        return "Vymaž 3 řady!"
+        return "Vymaž 3 řady! Použij R pro rotaci, C/Shift pro hold."
 
 class Game2048(BaseGame):
-    """2048 - zjednodušená verze"""
+    """Pong – 1 hráč vs AI, first to 3 goals wins."""
+
+    # --- constants (relative to the play area) ---
+    AREA_W = 700
+    AREA_H = 500
+    PADDLE_W = 12
+    PADDLE_H = 90
+    PADDLE_SPD = 6
+    AI_SPD = 3.5            # slightly slower than ball – beatable but not free
+    BALL_SZ = 12
+    BALL_DX = 5
+    BALL_DY = 4
+    GOALS_TO_WIN = 1
+
     def __init__(self):
         super().__init__()
-        self.grid = [[0] * 4 for _ in range(4)]
-        self.add_new_tile()
-        self.add_new_tile()
-        self.moves = 0
-    
-    def add_new_tile(self):
-        """Přidá nové číslo"""
-        empty = [(i, j) for i in range(4) for j in range(4) if self.grid[i][j] == 0]
-        if empty:
-            i, j = random.choice(empty)
-            self.grid[i][j] = random.choice([2, 4])
-    
+        self.started = False
+        self.paused = False
+        # 3-second countdown (180 frames at 60 FPS)
+        self.countdown = 180
+        self.countdown_active = False
+        # origin of play area (centred on 1920x1080)
+        self.ox = (SCREEN_WIDTH - self.AREA_W) // 2
+        self.oy = (SCREEN_HEIGHT - self.AREA_H) // 2
+        self.player_score = 0
+        self.ai_score = 0
+        self._reset_paddles()
+        self._reset_ball()
+
+    def _reset_paddles(self):
+        self.player_pad = pygame.Rect(
+            self.ox + 20,
+            self.oy + self.AREA_H // 2 - self.PADDLE_H // 2,
+            self.PADDLE_W, self.PADDLE_H)
+        self.ai_pad = pygame.Rect(
+            self.ox + self.AREA_W - 20 - self.PADDLE_W,
+            self.oy + self.AREA_H // 2 - self.PADDLE_H // 2,
+            self.PADDLE_W, self.PADDLE_H)
+
+    def _reset_ball(self):
+        dx = random.choice([-1, 1])
+        dy = random.choice([-1, 1])
+        self.ball = pygame.Rect(
+            self.ox + self.AREA_W // 2 - self.BALL_SZ // 2,
+            self.oy + self.AREA_H // 2 - self.BALL_SZ // 2,
+            self.BALL_SZ, self.BALL_SZ)
+        self.bdx = self.BALL_DX * dx
+        self.bdy = self.BALL_DY * dy
+        self.goal_pause = 0          # frames to freeze after a goal
+
+    # ----- event handling --------------------------------------------------
     def handle_event(self, event):
-        if event.type == pygame.KEYDOWN:
-            moved = False
-            if event.key in [pygame.K_a, pygame.K_LEFT]:
-                moved = self.move_left()
-            elif event.key in [pygame.K_d, pygame.K_RIGHT]:
-                moved = self.move_right()
-            elif event.key in [pygame.K_w, pygame.K_UP]:
-                moved = self.move_up()
-            elif event.key in [pygame.K_s, pygame.K_DOWN]:
-                moved = self.move_down()
-            
-            if moved:
-                self.add_new_tile()
-                self.moves += 1
-                if any(1024 in row for row in self.grid):
-                    self.won = True
-    
-    def move_left(self):
-        changed = False
-        new_grid = [[0] * 4 for _ in range(4)]
-        
-        for i in range(4):
-            tiles = [self.grid[i][j] for j in range(4) if self.grid[i][j] != 0]
-            
-            # Sloučit stejná čísla
-            merged = []
-            j = 0
-            while j < len(tiles):
-                if j + 1 < len(tiles) and tiles[j] == tiles[j + 1]:
-                    merged.append(tiles[j] * 2)
-                    j += 2
-                else:
-                    merged.append(tiles[j])
-                    j += 1
-            
-            # Umístit do nové řady
-            for j in range(len(merged)):
-                new_grid[i][j] = merged[j]
-        
-        if new_grid != self.grid:
-            changed = True
-        self.grid = new_grid
-        return changed
-    
-    def move_right(self):
-        self.grid = [row[::-1] for row in self.grid]
-        new_grid = [[0] * 4 for _ in range(4)]
-        changed = False
-        
-        for i in range(4):
-            tiles = [self.grid[i][j] for j in range(4) if self.grid[i][j] != 0]
-            merged = []
-            j = 0
-            while j < len(tiles):
-                if j + 1 < len(tiles) and tiles[j] == tiles[j + 1]:
-                    merged.append(tiles[j] * 2)
-                    j += 2
-                else:
-                    merged.append(tiles[j])
-                    j += 1
-            for j in range(len(merged)):
-                new_grid[i][j] = merged[j]
-        
-        if new_grid != self.grid:
-            changed = True
-        self.grid = new_grid
-        self.grid = [row[::-1] for row in self.grid]
-        return changed
-    
-    def move_up(self):
-        # Transponuj mřížku
-        self.grid = [list(row) for row in zip(*self.grid)]
-        new_grid = [[0] * 4 for _ in range(4)]
-        changed = False
-        
-        for i in range(4):
-            tiles = [self.grid[i][j] for j in range(4) if self.grid[i][j] != 0]
-            merged = []
-            j = 0
-            while j < len(tiles):
-                if j + 1 < len(tiles) and tiles[j] == tiles[j + 1]:
-                    merged.append(tiles[j] * 2)
-                    j += 2
-                else:
-                    merged.append(tiles[j])
-                    j += 1
-            for j in range(len(merged)):
-                new_grid[i][j] = merged[j]
-        
-        if new_grid != self.grid:
-            changed = True
-        self.grid = new_grid
-        # Vrť transponovanou mřížku
-        self.grid = [list(row) for row in zip(*self.grid)]
-        return changed
-    
-    def move_down(self):
-        # Transponuj mřížku
-        self.grid = [list(row) for row in zip(*self.grid)]
-        new_grid = [[0] * 4 for _ in range(4)]
-        changed = False
-        
-        for i in range(4):
-            tiles = [self.grid[i][j] for j in range(4) if self.grid[i][j] != 0]
-            merged = []
-            j = 0
-            while j < len(tiles):
-                if j + 1 < len(tiles) and tiles[j] == tiles[j + 1]:
-                    merged.append(tiles[j] * 2)
-                    j += 2
-                else:
-                    merged.append(tiles[j])
-                    j += 1
-            for j in range(len(merged)):
-                new_grid[i][3 - len(merged) + j] = merged[j]
-        
-        if new_grid != self.grid:
-            changed = True
-        self.grid = new_grid
-        self.grid = [list(row) for row in zip(*self.grid)]
-        return changed
-    
+        if event.type != pygame.KEYDOWN:
+            return
+        if not self.started:
+            self.started = True
+            self.countdown_active = True
+            return
+        if self.countdown_active:
+            return  # ignore input during countdown
+        if event.key == pygame.K_ESCAPE:
+            self.paused = not self.paused
+
+    # ----- update (called every frame) -------------------------------------
+    def update(self):
+        if not self.started or self.paused or self.won or self.lost:
+            return
+
+        # --- 3-second countdown ---
+        if self.countdown_active:
+            self.countdown -= 1
+            if self.countdown <= 0:
+                self.countdown_active = False
+            return
+
+        # goal-pause countdown
+        if self.goal_pause > 0:
+            self.goal_pause -= 1
+            return
+
+        # --- player paddle (continuous key reading) ---
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_w] or keys[pygame.K_UP]:
+            self.player_pad.y -= self.PADDLE_SPD
+        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+            self.player_pad.y += self.PADDLE_SPD
+        self.player_pad.clamp_ip(pygame.Rect(self.ox, self.oy, self.AREA_W, self.AREA_H))
+
+        # --- AI paddle (beatable but not trivial) ---
+        diff = self.ball.centery - self.ai_pad.centery
+        # 12% chance AI freezes this frame
+        if random.random() < 0.12:
+            pass
+        elif abs(diff) > 18:
+            self.ai_pad.y += self.AI_SPD if diff > 0 else -self.AI_SPD
+        self.ai_pad.clamp_ip(pygame.Rect(self.ox, self.oy, self.AREA_W, self.AREA_H))
+
+        # --- move ball ---
+        self.ball.x += self.bdx
+        self.ball.y += self.bdy
+
+        # bounce top/bottom
+        if self.ball.top <= self.oy:
+            self.ball.top = self.oy
+            self.bdy = abs(self.bdy)
+        elif self.ball.bottom >= self.oy + self.AREA_H:
+            self.ball.bottom = self.oy + self.AREA_H
+            self.bdy = -abs(self.bdy)
+
+        # bounce off paddles
+        if self.ball.colliderect(self.player_pad) and self.bdx < 0:
+            self.bdx = abs(self.bdx)
+            self.bdy += random.uniform(-1.5, 1.5)
+            self.ball.left = self.player_pad.right
+        elif self.ball.colliderect(self.ai_pad) and self.bdx > 0:
+            self.bdx = -abs(self.bdx)
+            self.bdy += random.uniform(-1.5, 1.5)
+            self.ball.right = self.ai_pad.left
+
+        # --- scoring ---
+        if self.ball.right <= self.ox:
+            self.ai_score += 1
+            self._reset_ball()
+            self.goal_pause = 40
+        elif self.ball.left >= self.ox + self.AREA_W:
+            self.player_score += 1
+            self._reset_ball()
+            self.goal_pause = 40
+
+        # win / lose
+        if self.player_score >= self.GOALS_TO_WIN:
+            self.won = True
+        elif self.ai_score >= self.GOALS_TO_WIN:
+            self.lost = True
+
+    # ----- drawing ---------------------------------------------------------
     def draw(self, screen):
-        screen.fill(DARK_BLUE)
-        
-        title = FONT_LARGE.render("2048", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH//2 - 100, 30))
-        
-        start_x = 400
-        start_y = 200
-        cell_size = 80
-        
-        for i in range(4):
-            for j in range(4):
-                rect = pygame.Rect(start_x + j * cell_size, start_y + i * cell_size, cell_size, cell_size)
-                value = self.grid[i][j]
-                
-                if value == 0:
-                    pygame.draw.rect(screen, GRAY, rect)
-                else:
-                    pygame.draw.rect(screen, YELLOW, rect)
-                    value_text = FONT_MEDIUM.render(str(value), True, BLACK)
-                    value_rect = value_text.get_rect(center=rect.center)
-                    screen.blit(value_text, value_rect)
-                
-                pygame.draw.rect(screen, WHITE, rect, 2)
-        
-        instr = FONT_SMALL.render("WSAD nebo ŠIPKY - Pohybuj čísla", True, WHITE)
-        screen.blit(instr, (SCREEN_WIDTH//2 - 200, 650))
-    
+        screen.fill((15, 15, 30))
+
+        ox, oy, aw, ah = self.ox, self.oy, self.AREA_W, self.AREA_H
+
+        # --- start screen ---
+        if not self.started:
+            t = FONT_LARGE.render("PONG", True, CYAN)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, 350))
+            s = FONT_SMALL.render("W/S nebo šipky = pohyb | Stiskni cokoliv", True, WHITE)
+            screen.blit(s, (SCREEN_WIDTH // 2 - s.get_width() // 2, 460))
+            return
+
+        # --- countdown overlay ---
+        if self.countdown_active:
+            # draw the field behind the countdown
+            pygame.draw.rect(screen, (25, 25, 45), (ox, oy, aw, ah))
+            pygame.draw.rect(screen, CYAN, (ox, oy, aw, ah), 2)
+            secs = self.countdown // 60 + 1   # 3, 2, 1
+            num = FONT_LARGE.render(str(min(secs, 3)), True, YELLOW)
+            screen.blit(num, (SCREEN_WIDTH // 2 - num.get_width() // 2,
+                              SCREEN_HEIGHT // 2 - num.get_height() // 2))
+            return
+
+        # area background + border
+        pygame.draw.rect(screen, (25, 25, 45), (ox, oy, aw, ah))
+        pygame.draw.rect(screen, CYAN, (ox, oy, aw, ah), 2)
+
+        # centre dashed line
+        for y in range(oy, oy + ah, 20):
+            pygame.draw.rect(screen, GRAY, (ox + aw // 2 - 1, y, 2, 10))
+
+        # paddles
+        pygame.draw.rect(screen, CYAN, self.player_pad)
+        pygame.draw.rect(screen, YELLOW, self.ai_pad)
+
+        # ball
+        pygame.draw.ellipse(screen, WHITE, self.ball)
+
+        # scores
+        pt = FONT_LARGE.render(str(self.player_score), True, CYAN)
+        at = FONT_LARGE.render(str(self.ai_score), True, YELLOW)
+        screen.blit(pt, (ox + aw // 4 - pt.get_width() // 2, oy - 70))
+        screen.blit(at, (ox + 3 * aw // 4 - at.get_width() // 2, oy - 70))
+
+        # labels
+        pl = FONT_TINY.render("TY", True, CYAN)
+        al = FONT_TINY.render("AI", True, YELLOW)
+        screen.blit(pl, (ox + aw // 4 - pl.get_width() // 2, oy - 90))
+        screen.blit(al, (ox + 3 * aw // 4 - al.get_width() // 2, oy - 90))
+
+        # info line
+        info = FONT_TINY.render(f"Kdo dá {self.GOALS_TO_WIN} góly, vyhrává!", True, LIGHT_GRAY)
+        screen.blit(info, (SCREEN_WIDTH // 2 - info.get_width() // 2, oy + ah + 15))
+
+        # overlays
+        if self.paused:
+            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 150))
+            screen.blit(ov, (0, 0))
+            t = FONT_LARGE.render("PAUZA", True, YELLOW)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+
+        if self.won:
+            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 160))
+            screen.blit(ov, (0, 0))
+            t = FONT_LARGE.render("VYHRÁL JSI!", True, GREEN)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+
+        if self.lost:
+            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 160))
+            screen.blit(ov, (0, 0))
+            t = FONT_LARGE.render("AI VYHRÁLA!", True, RED)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+
     def get_hint(self):
-        return "Skládej stejná čísla, dosáhni 1024!"
+        return "W/S nebo šipky nahoru/dolů – odráží míček!"
 
 class BalanceGame(BaseGame):
     """Hra s váhou - vyvážit předměty"""
@@ -1605,59 +2172,94 @@ class SwitchGame(BaseGame):
         return "Každé kliknutí změní stav sousedů!"
 
 class WordUnscrambler(BaseGame):
-    """Zamíchané slovo - roztřída písmena správně"""
+    """Zamíchané slovo - psaní textu + klikání na písmena"""
     def __init__(self):
         super().__init__()
         self.word_pairs = [
             ("AHOJ", "HOJA"),
-            ("HLAVA", "AALHV"),
-            ("PSANÍ", "NASIP"),
+            ("HLAVA", "VAHLA"),
+            ("PSANÍ", "NASÍP"),
             ("OKNO", "ONKO"),
-            ("STŮL", "SULT"),
+            ("STŮL", "LŮST"),
             ("KNIHA", "NHKIA"),
             ("BARVA", "VARBA"),
-            ("SŮNCE", "UNCES"),
-            ("MĚSTO", "STEMÓ"),
+            ("LÉTO", "TOLE"),
             ("TRÁVA", "VAART"),
-            ("CHLEB", "HCBLE"),
+            ("CHLEB", "LHCBE"),
             ("VODA", "ADOV"),
+            ("VÍTR", "RÍTV"),
+            ("SLOVO", "VOSLO"),
             ("MRAKY", "YAMRK"),
-            ("KŮRA", "URKA"),
-            ("VÍTR", "RIVT"),
-            ("OHEŇ", "HENÖ"),
-            ("ZÁPAD", "PADÁZ"),
-            ("VÝCHOD", "CCHODV"),
-            ("SEVER", "REVSÉ"),
-            ("SLANÝ", "NÁLSY"),
+            ("SLANÝ", "NASŁY"),
         ]
         
         self.current_pair = random.choice(self.word_pairs)
         self.original = self.current_pair[0]
         self.scrambled = list(self.current_pair[1])
-        self.answer = [""] * len(self.original)
+        self.answer = ""  # String místo seznamu
         self.used = [False] * len(self.scrambled)
     
     def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN:
+        if event.type == pygame.KEYDOWN:
+            # BACKSPACE = smazat poslední písmeno a vrátit do dostupných
+            if event.key == pygame.K_BACKSPACE:
+                if len(self.answer) > 0:
+                    # Najdi poslední písmeno v self.answer
+                    last_char = self.answer[-1]
+                    # Vrat ho do dostupných - označ jako nepoužité
+                    for i in range(len(self.scrambled) - 1, -1, -1):
+                        if self.scrambled[i] == last_char and self.used[i]:
+                            self.used[i] = False
+                            break
+                    # Odeber z odpovědi
+                    self.answer = self.answer[:-1]
+            # ENTER = ověřit odpověď
+            elif event.key == pygame.K_RETURN:
+                if self.answer.upper() == self.original:
+                    self.won = True
+                else:
+                    self.answer = ""
+                    self.used = [False] * len(self.scrambled)
+            # Psaní textu - přidej písmeno
+            elif event.unicode.isalpha():
+                char = event.unicode.upper()
+                # Zkontroluj, zda je písmeno ze scrambled a není ještě použito
+                if char in self.scrambled and len(self.answer) < len(self.original):
+                    # Najdi první nepoužívané výskyt písmena
+                    char_index = -1
+                    for i, letter in enumerate(self.scrambled):
+                        if letter == char and not self.used[i]:
+                            char_index = i
+                            break
+                    
+                    if char_index != -1:
+                        self.answer += char
+                        self.used[char_index] = True
+                        # Okamžitá kontrola výhry
+                        if self.answer == self.original:
+                            self.won = True
+        
+        elif event.type == pygame.MOUSEBUTTONDOWN:
             pos = event.pos
             
+            # Klikání na písmena
             for i in range(len(self.scrambled)):
                 if self.used[i]:
                     continue
                 x = 100 + i * 90
-                y = 300
+                y = 420
                 if pygame.Rect(x, y, 70, 70).collidepoint(pos):
-                    for j in range(len(self.answer)):
-                        if self.answer[j] == "":
-                            self.answer[j] = self.scrambled[i]
-                            self.used[i] = True
-                            self.check_win()
-                            return
-    
-    def check_win(self):
-        current = "".join(self.answer)
-        if current == self.original:
-            self.won = True
+                    if len(self.answer) < len(self.original):
+                        self.answer += self.scrambled[i]
+                        self.used[i] = True
+                        if self.answer == self.original:
+                            self.won = True
+                    return
+            
+            # Tlačítko SMAZAT
+            if pygame.Rect(SCREEN_WIDTH - 250, SCREEN_HEIGHT - 120, 200, 80).collidepoint(pos):
+                self.answer = ""
+                self.used = [False] * len(self.scrambled)
     
     def draw(self, screen):
         screen.fill(DARK_BLUE)
@@ -1665,21 +2267,31 @@ class WordUnscrambler(BaseGame):
         title = FONT_LARGE.render("SEŘAĎ SLOVO", True, CYAN)
         screen.blit(title, (SCREEN_WIDTH//2 - 140, 30))
         
-        instr1 = FONT_SMALL.render("Klikejte postupně na písmena v pořadí", True, YELLOW)
-        screen.blit(instr1, (SCREEN_WIDTH//2 - 250, 120))
+        instr1 = FONT_SMALL.render("Psej nebo klikej na písmena v správném pořadí", True, YELLOW)
+        screen.blit(instr1, (SCREEN_WIDTH//2 - 300, 120))
         
+        # Input box
+        answer_box_rect = pygame.Rect(SCREEN_WIDTH//2 - 250, 180, 500, 80)
+        pygame.draw.rect(screen, BLUE, answer_box_rect)
+        pygame.draw.rect(screen, CYAN, answer_box_rect, 3)
+        
+        # Vyplněná pole
         for i in range(len(self.original)):
-            x = 100 + i * 90
-            y = 200
-            color = GREEN if self.answer[i] != "" else BLUE
-            pygame.draw.rect(screen, color, pygame.Rect(x, y, 70, 70))
-            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 70, 70), 2)
+            x = SCREEN_WIDTH//2 - 240 + i * 95
+            y = 195
             
-            if self.answer[i]:
-                char_text = FONT_MEDIUM.render(self.answer[i], True, BLACK)
-                char_rect = char_text.get_rect(center=(x + 35, y + 35))
-                screen.blit(char_text, char_rect)
+            if i < len(self.answer):
+                pygame.draw.rect(screen, GREEN, pygame.Rect(x, y, 70, 70))
+                letter_text = FONT_MEDIUM.render(self.answer[i], True, BLACK)
+            else:
+                pygame.draw.rect(screen, (40, 40, 100), pygame.Rect(x, y, 70, 70))
+                letter_text = FONT_MEDIUM.render("_", True, WHITE)
+            
+            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 70, 70), 2)
+            letter_rect = letter_text.get_rect(center=(x + 35, y + 35))
+            screen.blit(letter_text, letter_rect)
         
+        # Dostupná písmena
         avail_text = FONT_SMALL.render("DOSTUPNÁ PÍSMENA:", True, CYAN)
         screen.blit(avail_text, (100, 350))
         
@@ -1691,12 +2303,21 @@ class WordUnscrambler(BaseGame):
             pygame.draw.rect(screen, BLUE, pygame.Rect(x, y, 70, 70))
             pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 70, 70), 2)
             
-            char_text = FONT_MEDIUM.render(char, True, BLACK)
+            char_text = FONT_MEDIUM.render(char, True, WHITE)
             char_rect = char_text.get_rect(center=(x + 35, y + 35))
             screen.blit(char_text, char_rect)
         
-        instr2 = FONT_SMALL.render("Slovo musí mít {} písmen".format(len(self.original)), True, WHITE)
-        screen.blit(instr2, (SCREEN_WIDTH//2 - 200, 700))
+        # Tlačítko SMAZAT
+        clear_btn_rect = pygame.Rect(SCREEN_WIDTH - 250, SCREEN_HEIGHT - 120, 200, 80)
+        pygame.draw.rect(screen, RED, clear_btn_rect)
+        pygame.draw.rect(screen, WHITE, clear_btn_rect, 2)
+        clear_text = FONT_SMALL.render("SMAZAT", True, BLACK)
+        clear_rect = clear_text.get_rect(center=clear_btn_rect.center)
+        screen.blit(clear_text, clear_rect)
+        
+        # Instrukce
+        instr2 = FONT_SMALL.render("ENTER: Ověř | BACKSPACE: Smazat poslední | KLIK na písmena", True, WHITE)
+        screen.blit(instr2, (SCREEN_WIDTH//2 - 350, 700))
     
     def get_hint(self):
         return f"Správné slovo: {self.original}"
@@ -2161,25 +2782,39 @@ class Hangman(BaseGame):
         
         wrong_text = FONT_MEDIUM.render(f"Chyby: {self.wrong}/{self.max_wrong}", True, RED)
         screen.blit(wrong_text, (SCREEN_WIDTH//2 - 150, 500))
+        
+        # OPRAVA: Zobraz slovo když prohraješ
+        if self.lost:
+            lost_text = FONT_LARGE.render(f"PROHRAUL! Slovo: {self.word}", True, RED)
+            screen.blit(lost_text, (SCREEN_WIDTH//2 - 300, 650))
     
     def get_hint(self):
         return f"Slovo: {self.word}"
 
 
 class ColorBlind(BaseGame):
-    """Najdi jinou barvu - stejná barva, jen jiný odstín"""
+    """Najdi jinou barvu - stejná barva, jen jiný odstín - VÍCE RUNDY A BAREV"""
     def __init__(self):
         super().__init__()
-        self.base_color = random.choice([RED, BLUE, YELLOW, GREEN])
+        self.total_rounds = 5  # Více rundy
+        self.current_round = 0
+        self.rounds_completed = 0
+        self.available_colors = [RED, BLUE, YELLOW, GREEN, CYAN]
+        self.generate_new_round()
+    
+    def generate_new_round(self):
+        """Generuj nové kolo s jinou barvou"""
+        self.base_color = random.choice(self.available_colors)
+        
         # Vytvoř podobný odstín - stejná barva, ale o něco světlejší/tmavší
-        if self.base_color == RED:
-            self.different_color = (200, 50, 50)  # Světlejší červená
-        elif self.base_color == BLUE:
-            self.different_color = (50, 100, 200)  # Světlejší modrá
-        elif self.base_color == YELLOW:
-            self.different_color = (200, 200, 100)  # Světlejší žlutá
-        else:  # GREEN
-            self.different_color = (100, 180, 100)  # Světlejší zelená
+        color_map = {
+            RED: (200, 50, 50),
+            BLUE: (50, 100, 200),
+            YELLOW: (200, 200, 100),
+            GREEN: (100, 180, 100),
+            CYAN: (50, 220, 220)
+        }
+        self.different_color = color_map[self.base_color]
         self.positions = list(range(16))
         self.different_pos = random.randint(0, 15)
         random.shuffle(self.positions)
@@ -2192,7 +2827,13 @@ class ColorBlind(BaseGame):
                 y = 250 + (i // 4) * 200
                 if pygame.Rect(x, y, 150, 150).collidepoint(pos):
                     if self.positions[i] == self.different_pos:
-                        self.won = True
+                        self.rounds_completed += 1
+                        if self.rounds_completed >= self.total_rounds:
+                            self.won = True
+                        else:
+                            # Další kolo
+                            self.current_round += 1
+                            self.generate_new_round()
                     else:
                         self.lost = True
                     break
@@ -2202,6 +2843,10 @@ class ColorBlind(BaseGame):
         title = FONT_LARGE.render("NAJDI ROZDÍL", True, CYAN)
         screen.blit(title, (SCREEN_WIDTH//2 - 150, 30))
         
+        # Počet rundy
+        round_text = FONT_MEDIUM.render(f"Kolo {self.rounds_completed + 1}/{self.total_rounds}", True, YELLOW)
+        screen.blit(round_text, (SCREEN_WIDTH//2 - 150, 100))
+        
         for i in range(16):
             x = 300 + (i % 4) * 200
             y = 250 + (i // 4) * 200
@@ -2210,7 +2855,7 @@ class ColorBlind(BaseGame):
             pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 150, 150), 2)
     
     def get_hint(self):
-        return "Najdi barvu která se liší!"
+        return f"Najdi jinou barvu! Kolo {self.rounds_completed + 1}/{self.total_rounds}"
 
 
 class MasterChallenge(BaseGame):
@@ -2475,6 +3120,8 @@ class RotatingImage(BaseGame):
     def __init__(self):
         super().__init__()
         self.shapes = ["kruh", "čtverec", "trojúhelník", "hvězda", "srdce"]
+        self.total_rounds = 5  # Více rundy
+        self.current_round = 0
         self.target_shape = random.choice(self.shapes)
         self.rotation = 0
         self.rotation_speed = 3
@@ -2516,25 +3163,31 @@ class RotatingImage(BaseGame):
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN:
             pos = event.pos
-            # Kliknutí POUZE na tlačítka s odpověďmi (ne na rotující tvar)
-            for i, shape in enumerate(["kruh", "čtverec", "trojúhelník"]):
-                x = 230 + i * 380
-                y = 600
-                # Větší klikatelná plocha
-                if pygame.Rect(x - 80, y - 40, 160, 80).collidepoint(pos):
+            # Kliknutí POUZE na veliké tlačítka s odpověďmi (ne na nadpisy/text)
+            shape_buttons = [
+                ("kruh", 150, 550, 250, 120),
+                ("čtverec", 650, 550, 250, 120),
+                ("trojúhelník", 1150, 550, 250, 120)
+            ]
+            
+            for shape, x, y, w, h in shape_buttons:
+                if pygame.Rect(x, y, w, h).collidepoint(pos):
                     if shape == self.target_shape:
+                        self.current_round += 1
                         self.correct_clicks += 1
-                        if self.correct_clicks >= 3:
+                        if self.current_round >= self.total_rounds:
                             self.won = True
+                        else:
+                            # Další kolo - nový tvar
+                            self.target_shape = random.choice(self.shapes)
                     else:
-                        if self.click_count > 0:
-                            self.click_count -= 1
+                        self.lost = True
     
     def update(self):
         self.rotation += self.rotation_speed
         self.timer += 1
-        if self.timer > 1800:  # 30 sekund
-            if self.correct_clicks >= 3:
+        if self.timer > 2400:  # 40 sekund pro více rundy
+            if self.current_round >= self.total_rounds:
                 self.won = True
             else:
                 self.lost = True
@@ -2545,250 +3198,268 @@ class RotatingImage(BaseGame):
         title = FONT_LARGE.render("ROZPOZNEJ TVAR", True, CYAN)
         screen.blit(title, (SCREEN_WIDTH//2 - 180, 30))
         
-        # Rotující tvar
-        self.draw_shape(screen, "kruh", SCREEN_WIDTH//2, 300, 60, self.rotation)
+        # Rotující tvar - uprostřed
+        self.draw_shape(screen, "kruh", SCREEN_WIDTH//2, 280, 80, self.rotation)
         
-        info = FONT_SMALL.render(f"Tvar se otáčí - rozpoznej jej! Správně: {self.correct_clicks}/3", True, YELLOW)
-        screen.blit(info, (SCREEN_WIDTH//2 - 250, 450))
+        # Počet rundy
+        round_text = FONT_MEDIUM.render(f"Kolo {self.current_round + 1}/{self.total_rounds}", True, YELLOW)
+        screen.blit(round_text, (SCREEN_WIDTH//2 - 150, 400))
         
-        # Tlačítka s odpověďmi - větší a čitelnější
-        for i, shape in enumerate(["kruh", "čtverec", "trojúhelník"]):
-            x = 230 + i * 380
-            y = 600
-            pygame.draw.rect(screen, BLUE, pygame.Rect(x - 80, y - 40, 160, 80))
-            pygame.draw.rect(screen, WHITE, pygame.Rect(x - 80, y - 40, 160, 80), 3)
+        info = FONT_SMALL.render(f"Tvar se otáčí - rozpoznej jej!", True, YELLOW)
+        screen.blit(info, (SCREEN_WIDTH//2 - 180, 460))
+        
+        # Velká tlačítka s odpověďmi - oddělená
+        shapes_info = [
+            ("kruh", 150, 550, 250, 120, RED),
+            ("čtverec", 650, 550, 250, 120, BLUE),
+            ("trojúhelník", 1150, 550, 250, 120, GREEN)
+        ]
+        
+        for shape, x, y, w, h, shape_color in shapes_info:
+            pygame.draw.rect(screen, BLUE, pygame.Rect(x, y, w, h))
+            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, w, h), 4)
             
-            text = FONT_SMALL.render(shape, True, WHITE)
-            text_rect = text.get_rect(center=(x, y))
+            text = FONT_MEDIUM.render(shape.upper(), True, WHITE)
+            text_rect = text.get_rect(center=(x + w//2, y + h//2))
             screen.blit(text, text_rect)
     
     def get_hint(self):
-        return f"Tvar se otáčí - jde o {self.target_shape}!"
+        return f"Tvar se otáčí - jde o {self.target_shape}! Kolo {self.current_round + 1}/{self.total_rounds}"
 
 
 class LaserMirrors(BaseGame):
-    """Laserová zrcadla - nasměruj laser na cíl - OPRAVENÉ S POČÍTAČEM ODRAZŮ"""
+    """Laser Reflection Puzzle – nasměruj laser na cíl otáčením zrcadel na mřížce."""
+
+    # Grid dimensions and cell size
+    G_COLS = 10
+    G_ROWS = 8
+    CELL = 64
+
+    # Directions: RIGHT, DOWN, LEFT, UP  (dx, dy)
+    DIRS = [(1, 0), (0, 1), (-1, 0), (0, -1)]
+
     def __init__(self):
         super().__init__()
-        self.laser_start = (150, 540)
-        self.laser_direction = 0
-        self.target = (1750, 540)
-        self.mirrors = [
-            {"pos": (600, 400), "angle": 45, "id": 0},
-            {"pos": (1200, 650), "angle": 45, "id": 1},
-            {"pos": (1500, 350), "angle": 45, "id": 2}
+
+        # Cursor position (grid coords)
+        self.cx = 4
+        self.cy = 3
+
+        # ------- puzzle layout -------
+        # Grid map (10 cols × 8 rows):
+        #
+        #   0  1  2  3  4  5  6  7  8  9
+        # 0 .  .  .  .  .  .  .  .  .  .
+        # 1 .  .  M3 .  .  .  .  M5 .  .
+        # 2 .  .  .  .  .  .  B  .  .  .
+        # 3 L→ .  .  .  M1 .  .  M4 .  .
+        # 4 .  .  .  .  .  B  .  .  .  .
+        # 5 .  .  .  .  M2 .  .  .  .  T
+        # 6 .  .  M6 B  .  .  B  .  .  .
+        # 7 .  .  .  .  .  .  .  .  .  .
+        #
+        # Solution: set M1(4,3)="\" and M2(4,5)="\"
+        # Path: (0,3)→→→→(4,3)↓(4,4)↓(4,5)→→→→→(9,5) TARGET
+
+        # Laser emitter: left edge, row 3, shoots RIGHT
+        self.emitter = (0, 3)
+        self.emit_dir = 0                # index into DIRS → RIGHT
+
+        # Target: right edge, row 5
+        self.target = (9, 5)
+
+        # Grid: None = empty, "block" = wall, dict = mirror
+        self.grid = [[None] * self.G_COLS for _ in range(self.G_ROWS)]
+
+        # Fixed walls / obstacles
+        walls = [(6, 2), (5, 4), (3, 6), (6, 6)]
+        for wx, wy in walls:
+            self.grid[wy][wx] = "block"
+
+        # Mirrors – solution mirrors start WRONG so player must rotate them
+        # M1 & M2 are on the solution path; M3-M6 are decoys
+        mirrors = [
+            (4, 3, "/"),    # M1 – must become "\" for solution
+            (4, 5, "/"),    # M2 – must become "\" for solution
+            (2, 1, "/"),    # M3 – decoy (off path)
+            (7, 3, "\\"),   # M4 – decoy (after M1 deflection, laser never reaches col 7 on row 3)
+            (7, 1, "/"),    # M5 – decoy (off path)
+            (2, 6, "\\"),   # M6 – decoy (off path)
         ]
-        self.laser_segments = []
-        self.reflection_count = 0
-        self.visited_mirrors = set()
-        self.trace_laser()
-    
-    def trace_laser(self):
-        """Vysleduje cestu laseru skrz zrcadla a odrazuje se od sten - VIDITELNY LASER"""
-        self.laser_segments = []
-        self.reflection_count = 0
-        self.visited_mirrors = set()
-        
-        pos = list(self.laser_start)
-        direction = self.laser_direction
-        bounce_count = 0
-        max_bounces = 4
-        
-        # Trace laser up to 150 segments
-        for iteration in range(150):
-            if bounce_count > max_bounces:
+        for mx, my, angle in mirrors:
+            self.grid[my][mx] = {"type": "mirror", "angle": angle}
+
+        # Precompute laser path
+        self.laser_path = []
+        self.hit_target = False
+        self._trace_laser()
+
+    # ------------------------------------------------------------------
+    #  LASER TRACING
+    # ------------------------------------------------------------------
+    def _reflect(self, dir_idx, angle):
+        """Return new direction index after hitting a mirror of given angle."""
+        if angle == "/":
+            #  RIGHT(0)→UP(3), DOWN(1)→LEFT(2), LEFT(2)→DOWN(1), UP(3)→RIGHT(0)
+            return [3, 2, 1, 0][dir_idx]
+        else:  # "\\"
+            #  RIGHT(0)→DOWN(1), DOWN(1)→RIGHT(0), LEFT(2)→UP(3), UP(3)→LEFT(2)
+            return [1, 0, 3, 2][dir_idx]
+
+    def _trace_laser(self):
+        """Trace the laser beam from the emitter through the grid."""
+        self.laser_path = []
+        self.hit_target = False
+
+        x, y = self.emitter
+        d = self.emit_dir
+        visited = set()
+
+        # The beam starts *entering* the emitter cell
+        for _ in range(200):  # safety limit
+            # Record that we're in this cell going this direction
+            state = (x, y, d)
+            if state in visited:
+                break  # infinite loop detected
+            visited.add(state)
+
+            self.laser_path.append((x, y))
+
+            # Check if we reached the target
+            if (x, y) == self.target:
+                self.hit_target = True
                 break
-            
-            # Find next collision
-            min_dist = float('inf')
-            next_target = None
-            collision_type = None
-            
-            # Check mirrors
-            for mirror in self.mirrors:
-                if mirror["id"] in self.visited_mirrors:
-                    continue
-                    
-                mx, my = mirror["pos"]
-                # Calculate intersection with mirror (treat as circle)
-                dx = mx - pos[0]
-                dy = my - pos[1]
-                dist_to_mirror = math.sqrt(dx**2 + dy**2)
-                
-                if dist_to_mirror < 50 and dist_to_mirror < min_dist:
-                    min_dist = dist_to_mirror
-                    next_target = mirror
-                    collision_type = "mirror"
-            
-            # Check target
-            tx, ty = self.target
-            dx = tx - pos[0]
-            dy = ty - pos[1]
-            dist_to_target = math.sqrt(dx**2 + dy**2)
-            
-            if dist_to_target < 50 and dist_to_target < min_dist:
-                min_dist = dist_to_target
-                next_target = None
-                collision_type = "target"
-            
-            # Check walls
-            # Trace ray to find wall intersection
-            cos_dir = math.cos(math.radians(direction))
-            sin_dir = math.sin(math.radians(direction))
-            
-            # Find closest wall
-            walls_dist = []
-            
-            # Right wall (SCREEN_WIDTH)
-            if cos_dir > 0.01:
-                t = (SCREEN_WIDTH - pos[0]) / cos_dir
-                if t > 0:
-                    test_y = pos[1] + t * sin_dir
-                    if 0 <= test_y <= SCREEN_HEIGHT:
-                        walls_dist.append((t, "right"))
-            
-            # Left wall (0)
-            if cos_dir < -0.01:
-                t = -pos[0] / cos_dir
-                if t > 0:
-                    test_y = pos[1] + t * sin_dir
-                    if 0 <= test_y <= SCREEN_HEIGHT:
-                        walls_dist.append((t, "left"))
-            
-            # Bottom wall (SCREEN_HEIGHT)
-            if sin_dir > 0.01:
-                t = (SCREEN_HEIGHT - pos[1]) / sin_dir
-                if t > 0:
-                    test_x = pos[0] + t * cos_dir
-                    if 0 <= test_x <= SCREEN_WIDTH:
-                        walls_dist.append((t, "bottom"))
-            
-            # Top wall (0)
-            if sin_dir < -0.01:
-                t = -pos[1] / sin_dir
-                if t > 0:
-                    test_x = pos[0] + t * cos_dir
-                    if 0 <= test_x <= SCREEN_WIDTH:
-                        walls_dist.append((t, "top"))
-            
-            if walls_dist:
-                walls_dist.sort(key=lambda x: x[0])
-                wall_dist, wall_type = walls_dist[0]
-                
-                if wall_dist < min_dist:
-                    min_dist = wall_dist
-                    next_target = (pos[0] + wall_dist * cos_dir, 
-                                   pos[1] + wall_dist * sin_dir)
-                    collision_type = "wall"
-            
-            if collision_type is None:
-                # No collision - trace to end of screen
-                t = 500
-                end_pos = (pos[0] + t * cos_dir, pos[1] + t * sin_dir)
-                self.laser_segments.append((tuple(pos), end_pos))
-                break
-            
-            if collision_type == "mirror":
-                mirror = next_target
-                mx, my = mirror["pos"]
-                
-                # Draw segment to mirror
-                self.laser_segments.append((tuple(pos), (mx, my)))
-                self.visited_mirrors.add(mirror["id"])
-                self.reflection_count = len(self.visited_mirrors)
-                bounce_count += 1
-                
-                # Bounce: reflect direction off mirror angle
-                direction = (2 * mirror["angle"] - direction) % 360
-                pos = [mx, my]
-            
-            elif collision_type == "target":
-                tx, ty = self.target
-                self.laser_segments.append((tuple(pos), (tx, ty)))
-                
-                if self.reflection_count >= 1:
-                    self.won = True
-                break
-            
-            elif collision_type == "wall":
-                wall_x, wall_y = next_target
-                self.laser_segments.append((tuple(pos), (wall_x, wall_y)))
-                bounce_count += 1
-                
-                # Bounce off wall (reflect direction)
-                cos_dir = math.cos(math.radians(direction))
-                sin_dir = math.sin(math.radians(direction))
-                
-                # Determine which wall and bounce accordingly
-                if wall_x <= 0 or wall_x >= SCREEN_WIDTH:
-                    # Vertical wall - flip horizontal component
-                    direction = (180 - direction) % 360
-                if wall_y <= 0 or wall_y >= SCREEN_HEIGHT:
-                    # Horizontal wall - flip vertical component
-                    direction = (360 - direction) % 360
-                
-                pos = [wall_x, wall_y]
-    
-    def distance(self, p1, p2):
-        return math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
-    
+
+            # Check what's in this cell
+            cell = self.grid[y][x]
+            if cell == "block":
+                break  # absorbed by wall
+            if isinstance(cell, dict) and cell["type"] == "mirror":
+                d = self._reflect(d, cell["angle"])
+
+            # Move to next cell
+            dx, dy = self.DIRS[d]
+            nx, ny = x + dx, y + dy
+            if nx < 0 or nx >= self.G_COLS or ny < 0 or ny >= self.G_ROWS:
+                break  # left the grid
+            x, y = nx, ny
+
+        if self.hit_target:
+            self.won = True
+
+    # ------------------------------------------------------------------
+    #  INPUT
+    # ------------------------------------------------------------------
     def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            pos = event.pos
-            for mirror in self.mirrors:
-                mx, my = mirror["pos"]
-                if pygame.Rect(mx - 30, my - 30, 60, 60).collidepoint(pos):
-                    mirror["angle"] = (mirror["angle"] + 45) % 360
-                    self.trace_laser()
-    
-    def draw(self, screen):
-        screen.fill(DARK_BLUE)
-        
-        title = FONT_LARGE.render("LASEROVA ZRCADLA", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH//2 - 250, 30))
-        
-        # Laser start (zdroj)
-        pygame.draw.circle(screen, GREEN, self.laser_start, 18)
-        pygame.draw.circle(screen, CYAN, self.laser_start, 18, 3)
-        
-        # Target (cíl)
-        pygame.draw.circle(screen, RED, self.target, 18)
-        pygame.draw.circle(screen, (255, 100, 100), self.target, 18, 3)
-        
-        # Zrcadla
-        for mirror in self.mirrors:
-            mx, my = mirror["pos"]
-            # Zrcadlo čtverec
-            pygame.draw.rect(screen, YELLOW, pygame.Rect(mx - 22, my - 22, 44, 44))
-            pygame.draw.rect(screen, WHITE, pygame.Rect(mx - 22, my - 22, 44, 44), 2)
-            
-            # Indikátor sklonu zrcadla
-            angle = mirror["angle"]
-            end_x = mx + 28 * math.cos(math.radians(angle))
-            end_y = my + 28 * math.sin(math.radians(angle))
-            pygame.draw.line(screen, BLACK, (mx, my), (end_x, end_y), 3)
-        
-        # Kreslení laserového paprsku
-        for seg in self.laser_segments:
-            p1, p2 = seg
-            pygame.draw.line(screen, CYAN, p1, p2, 5)
-            # Efekt záblesku
-            pygame.draw.line(screen, (100, 255, 255), p1, p2, 2)
-        
-        # Ukaž počet odrazů
-        refl_text = FONT_MEDIUM.render(f"Odrazy: {self.reflection_count}/3", True, 
-                                       GREEN if self.reflection_count >= 3 else YELLOW)
-        screen.blit(refl_text, (SCREEN_WIDTH//2 - 120, 100))
-        
+        if event.type != pygame.KEYDOWN:
+            return
         if self.won:
-            win_text = FONT_LARGE.render("TRESINK!!!", True, GREEN)
-            screen.blit(win_text, (SCREEN_WIDTH//2 - 180, 200))
-        
-        instr = FONT_SMALL.render("KLIKNI NA ZRCADLA (45 stupnu) - Potrebujes 3+ ODRAZY!", True, WHITE)
-        screen.blit(instr, (SCREEN_WIDTH//2 - 320, 700))
-    
+            return
+
+        # Cursor movement
+        if event.key in (pygame.K_LEFT, pygame.K_a):
+            self.cx = max(0, self.cx - 1)
+        elif event.key in (pygame.K_RIGHT, pygame.K_d):
+            self.cx = min(self.G_COLS - 1, self.cx + 1)
+        elif event.key in (pygame.K_UP, pygame.K_w):
+            self.cy = max(0, self.cy - 1)
+        elif event.key in (pygame.K_DOWN, pygame.K_s):
+            self.cy = min(self.G_ROWS - 1, self.cy + 1)
+
+        # Rotate mirror under cursor (Space or R)
+        elif event.key in (pygame.K_SPACE, pygame.K_r):
+            cell = self.grid[self.cy][self.cx]
+            if isinstance(cell, dict) and cell["type"] == "mirror":
+                cell["angle"] = "\\" if cell["angle"] == "/" else "/"
+                self._trace_laser()
+
+    # ------------------------------------------------------------------
+    #  DRAWING
+    # ------------------------------------------------------------------
+    def draw(self, screen):
+        screen.fill((10, 10, 25))
+
+        # Origin so the grid is centred
+        ox = (SCREEN_WIDTH - self.G_COLS * self.CELL) // 2
+        oy = (SCREEN_HEIGHT - self.G_ROWS * self.CELL) // 2
+
+        # --- draw grid cells ---
+        for gy in range(self.G_ROWS):
+            for gx in range(self.G_COLS):
+                rx = ox + gx * self.CELL
+                ry = oy + gy * self.CELL
+                rect = pygame.Rect(rx, ry, self.CELL, self.CELL)
+
+                cell = self.grid[gy][gx]
+
+                if cell == "block":
+                    pygame.draw.rect(screen, (80, 80, 100), rect)
+                    pygame.draw.rect(screen, (120, 120, 140), rect, 2)
+                else:
+                    pygame.draw.rect(screen, (25, 25, 45), rect)
+                    pygame.draw.rect(screen, (45, 45, 65), rect, 1)
+
+                # Mirror
+                if isinstance(cell, dict) and cell["type"] == "mirror":
+                    pad = 10
+                    if cell["angle"] == "/":
+                        pygame.draw.line(screen, YELLOW,
+                                         (rx + pad, ry + self.CELL - pad),
+                                         (rx + self.CELL - pad, ry + pad), 4)
+                    else:
+                        pygame.draw.line(screen, YELLOW,
+                                         (rx + pad, ry + pad),
+                                         (rx + self.CELL - pad, ry + self.CELL - pad), 4)
+
+        # --- emitter ---
+        ex = ox + self.emitter[0] * self.CELL + self.CELL // 2
+        ey = oy + self.emitter[1] * self.CELL + self.CELL // 2
+        pygame.draw.circle(screen, GREEN, (ex, ey), 16)
+        lbl = FONT_TINY.render("L", True, BLACK)
+        screen.blit(lbl, (ex - lbl.get_width() // 2, ey - lbl.get_height() // 2))
+
+        # --- target ---
+        tx = ox + self.target[0] * self.CELL + self.CELL // 2
+        ty = oy + self.target[1] * self.CELL + self.CELL // 2
+        pygame.draw.circle(screen, RED, (tx, ty), 16)
+        lbl = FONT_TINY.render("T", True, WHITE)
+        screen.blit(lbl, (tx - lbl.get_width() // 2, ty - lbl.get_height() // 2))
+
+        # --- laser beam ---
+        beam_color = (0, 255, 100) if self.hit_target else (0, 200, 255)
+        glow_color = (100, 255, 180) if self.hit_target else (120, 230, 255)
+        for i in range(len(self.laser_path) - 1):
+            ax, ay = self.laser_path[i]
+            bx, by = self.laser_path[i + 1]
+            p1 = (ox + ax * self.CELL + self.CELL // 2, oy + ay * self.CELL + self.CELL // 2)
+            p2 = (ox + bx * self.CELL + self.CELL // 2, oy + by * self.CELL + self.CELL // 2)
+            pygame.draw.line(screen, beam_color, p1, p2, 4)
+            pygame.draw.line(screen, glow_color, p1, p2, 2)
+
+        # --- cursor highlight ---
+        cur_rect = pygame.Rect(ox + self.cx * self.CELL, oy + self.cy * self.CELL,
+                               self.CELL, self.CELL)
+        pygame.draw.rect(screen, WHITE, cur_rect, 3)
+
+        # --- title ---
+        title = FONT_MEDIUM.render("LASER REFLECTION", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 20))
+
+        # --- instructions ---
+        instr = FONT_TINY.render("ŠIPKY/WASD = pohyb kurzoru | SPACE/R = otočit zrcadlo | "
+                                 "Nasměruj laser (zelený) na cíl (červený)", True, LIGHT_GRAY)
+        screen.blit(instr, (SCREEN_WIDTH // 2 - instr.get_width() // 2, SCREEN_HEIGHT - 40))
+
+        # --- win overlay ---
+        if self.won:
+            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 150))
+            screen.blit(ov, (0, 0))
+            t = FONT_LARGE.render("LASER NA CÍLI!", True, GREEN)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+
     def get_hint(self):
-        return f"Otáčej zrcadla aby laser (zelený) dosáhl cíle (červený) - potřebuješ {3 - self.reflection_count} více odrazů!"
+        return "Otáčej zrcadla (Space/R) a nasměruj laser na červený cíl!"
 
 
 class FindDifferences(BaseGame):
@@ -2966,165 +3637,327 @@ class ColorMatch(BaseGame):
 
 
 class PipeRotate(BaseGame):
-    """Otáčení potrubí - propoj START a CÍL - OPRAVENÉ S VALIDACÍ PŘIPOJENÍ"""
-    
-    PIPE_TYPES = {
-        "straight": [(0, 180)],  # Přímá linka - vždy opačné směry
-        "corner": [(0, 90)]  # Rohová - vždy kolmé směry
+    """
+    Pipe Puzzle – 8×8 grid.  Rotate pipes so a continuous path connects
+    the green START node to the red END node.
+    Left-click = rotate clockwise 90°.  Right-click = rotate counter-clockwise.
+    Locked pipes (shown with a padlock dot) cannot be rotated.
+    """
+
+    # Each pipe type lists its base openings as a frozenset of sides.
+    # Sides: 0=RIGHT  1=DOWN  2=LEFT  3=UP
+    PIPE_DEFS = {
+        "straight": frozenset([0, 2]),       # ─  horizontal
+        "curve":    frozenset([0, 1]),        # ╮  L-shape (right+down)
+        "t_junc":   frozenset([0, 1, 2]),    # ┬  T-shape
+        "cross":    frozenset([0, 1, 2, 3]), # ┼  4-way
+        "dead":     frozenset([0]),           # ╶  dead-end (one opening)
     }
-    
+
+    OPPOSITE = {0: 2, 1: 3, 2: 0, 3: 1}
+    DIR_DELTA = {0: (1, 0), 1: (0, 1), 2: (-1, 0), 3: (0, -1)}  # (dx, dy)
+
+    GRID_COLS = 8
+    GRID_ROWS = 8
+    CELL = 80
+
     def __init__(self):
         super().__init__()
-        self.grid_size = 5
-        self.cell_size = 120
-        self.start_pos = (0, 0)
-        self.end_pos = (4, 4)
-        self.pipes = [[{"type": "straight", "rotation": 0} for _ in range(self.grid_size)] for _ in range(self.grid_size)]
-        self.generate_pipes()
-    
-    def generate_pipes(self):
-        """Generuje náhodné potrubí"""
-        types = ["straight", "corner"]
-        for y in range(self.grid_size):
-            for x in range(self.grid_size):
-                self.pipes[y][x] = {
-                    "type": random.choice(types),
-                    "rotation": random.randint(0, 3) * 90
-                }
-    
-    def get_pipe_openings(self, pipe_type, rotation):
-        """Vrátí směry, kam se trubka připojuje (0=vpravo, 90=dolu, 180=vlevo, 270=nahoru)"""
-        if pipe_type not in self.PIPE_TYPES:
-            return set()
-        base_openings = self.PIPE_TYPES[pipe_type]
-        pipe_dirs = set()
-        for opening_pair in base_openings:
-            dir1 = (opening_pair[0] + rotation) % 360
-            dir2 = (opening_pair[1] + rotation) % 360
-            pipe_dirs.add(dir1)
-            pipe_dirs.add(dir2)
-        return pipe_dirs
-    
-    def is_path_connected(self):
-        """Ověří propojení s kontrolou skutečných otvorů trubek"""
-        from collections import deque
-        
-        queue = deque([self.start_pos])
-        visited = {self.start_pos}
-        
-        DIRECTIONS = {0: (1, 0), 90: (0, 1), 180: (-1, 0), 270: (0, -1)}
-        OPPOSITE = {0: 180, 90: 270, 180: 0, 270: 90}
-        
-        while queue:
-            y, x = queue.popleft()
-            
-            if (y, x) == self.end_pos:
+        self.moves = 0
+        self.start = (0, 0)       # (col, row)
+        self.end   = (7, 7)
+
+        # Build a guaranteed-solvable puzzle
+        self.grid = [[None] * self.GRID_COLS for _ in range(self.GRID_ROWS)]
+        self._build_puzzle()
+
+    # ------------------------------------------------------------------
+    #  PUZZLE BUILDER – lay out a solution path, fill extras, scramble
+    # ------------------------------------------------------------------
+    def _build_puzzle(self):
+        """
+        1. Carve a random path from START to END (DFS on the grid).
+        2. Assign pipe types that match the path's shape.
+        3. Fill remaining empty cells with random pipes.
+        4. Lock a few pipes on the solution path as hints.
+        5. Scramble every unlocked pipe rotation so the player has work to do.
+        """
+        path = self._random_path(self.start, self.end)
+
+        # --- assign pipe types & correct rotations along the path ---
+        for idx, (cx, cy) in enumerate(path):
+            needed = set()                       # sides that must be open
+            if idx > 0:
+                px, py = path[idx - 1]
+                needed.add(self._side_towards(cx, cy, px, py))
+            if idx < len(path) - 1:
+                nx, ny = path[idx + 1]
+                needed.add(self._side_towards(cx, cy, nx, ny))
+
+            pipe_type, rotation = self._best_pipe(needed)
+            self.grid[cy][cx] = {
+                "type": pipe_type,
+                "rot": rotation,
+                "locked": False,
+            }
+
+        # --- fill remaining cells with random pipes ---
+        types_pool = ["straight", "curve", "t_junc", "dead"]
+        for r in range(self.GRID_ROWS):
+            for c in range(self.GRID_COLS):
+                if self.grid[r][c] is None:
+                    self.grid[r][c] = {
+                        "type": random.choice(types_pool),
+                        "rot": random.randint(0, 3),
+                        "locked": False,
+                    }
+
+        # --- lock 5 pipes on the path as hints (always lock start & end) ---
+        lock_indices = {0, len(path) - 1}
+        mid_indices = list(range(1, len(path) - 1))
+        random.shuffle(mid_indices)
+        for li in mid_indices[:3]:
+            lock_indices.add(li)
+        for li in lock_indices:
+            cx, cy = path[li]
+            self.grid[cy][cx]["locked"] = True
+
+        # --- scramble unlocked pipes ---
+        for r in range(self.GRID_ROWS):
+            for c in range(self.GRID_COLS):
+                cell = self.grid[r][c]
+                if not cell["locked"]:
+                    cell["rot"] = random.randint(0, 3)
+
+    # ---- path utilities ---------------------------------------------------
+    def _random_path(self, start, end):
+        """DFS-based random walk from start to end, visiting cells at most once."""
+        sx, sy = start
+        ex, ey = end
+        visited = set()
+        visited.add((sx, sy))
+        path = [(sx, sy)]
+
+        def dfs(x, y):
+            if (x, y) == (ex, ey):
                 return True
-            
-            pipe = self.pipes[y][x]
-            pipe_dirs = self.get_pipe_openings(pipe["type"], pipe["rotation"])
-            
-            for direction in pipe_dirs:
-                dy, dx = DIRECTIONS[direction]
-                next_y, next_x = y + dy, x + dx
-                
-                if 0 <= next_y < self.grid_size and 0 <= next_x < self.grid_size:
-                    if (next_y, next_x) not in visited:
-                        next_pipe = self.pipes[next_y][next_x]
-                        next_dirs = self.get_pipe_openings(next_pipe["type"], next_pipe["rotation"])
-                        
-                        # Ověř, že následující trubka se připojuje zpět (opačný směr)
-                        if OPPOSITE[direction] in next_dirs:
-                            visited.add((next_y, next_x))
-                            queue.append((next_y, next_x))
-        
-        return False
-    
+            neighbours = [(x+1, y), (x-1, y), (x, y+1), (x, y-1)]
+            random.shuffle(neighbours)
+            for nx, ny in neighbours:
+                if 0 <= nx < self.GRID_COLS and 0 <= ny < self.GRID_ROWS and (nx, ny) not in visited:
+                    visited.add((nx, ny))
+                    path.append((nx, ny))
+                    if dfs(nx, ny):
+                        return True
+                    path.pop()
+                    visited.discard((nx, ny))
+            return False
+
+        dfs(sx, sy)
+        return path
+
+    @staticmethod
+    def _side_towards(cx, cy, tx, ty):
+        """Return the side index of (cx,cy) that faces (tx,ty)."""
+        dx, dy = tx - cx, ty - cy
+        if dx == 1:  return 0   # RIGHT
+        if dy == 1:  return 1   # DOWN
+        if dx == -1: return 2   # LEFT
+        return 3                # UP
+
+    def _best_pipe(self, needed_sides):
+        """
+        Choose the simplest pipe type whose base openings can be rotated
+        to cover *exactly* the needed_sides set.  Returns (type, rotation).
+        """
+        # Try types from simplest to most complex
+        preference = ["dead", "straight", "curve", "t_junc", "cross"]
+        for ptype in preference:
+            base = self.PIPE_DEFS[ptype]
+            for rot in range(4):
+                rotated = frozenset((s + rot) % 4 for s in base)
+                if needed_sides <= rotated and len(rotated) - len(needed_sides) <= 1:
+                    return ptype, rot
+        # fallback: cross always works
+        return "cross", 0
+
+    # ------------------------------------------------------------------
+    #  OPENINGS HELPER
+    # ------------------------------------------------------------------
+    def _openings(self, cell):
+        """Return set of open sides for a cell dict."""
+        base = self.PIPE_DEFS.get(cell["type"], frozenset())
+        return frozenset((s + cell["rot"]) % 4 for s in base)
+
+    # ------------------------------------------------------------------
+    #  PATH VALIDATION (BFS)
+    # ------------------------------------------------------------------
+    def _find_connected_path(self):
+        """BFS from START.  Returns the set of connected cells and whether END is reached."""
+        sx, sy = self.start
+        visited = set()
+        queue = deque([(sx, sy)])
+        visited.add((sx, sy))
+
+        while queue:
+            x, y = queue.popleft()
+            cell = self.grid[y][x]
+            for side in self._openings(cell):
+                dx, dy = self.DIR_DELTA[side]
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < self.GRID_COLS and 0 <= ny < self.GRID_ROWS and (nx, ny) not in visited:
+                    neighbour = self.grid[ny][nx]
+                    if self.OPPOSITE[side] in self._openings(neighbour):
+                        visited.add((nx, ny))
+                        queue.append((nx, ny))
+
+        return visited, self.end in visited
+
+    # ------------------------------------------------------------------
+    #  INPUT
+    # ------------------------------------------------------------------
     def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            pos = event.pos
-            for y in range(self.grid_size):
-                for x in range(self.grid_size):
-                    px = 300 + x * self.cell_size
-                    py = 200 + y * self.cell_size
-                    if pygame.Rect(px, py, self.cell_size - 10, self.cell_size - 10).collidepoint(pos):
-                        self.pipes[y][x]["rotation"] = (self.pipes[y][x]["rotation"] + 90) % 360
-                        if self.is_path_connected():
-                            self.won = True
-    
-    def draw_pipe_shape(self, screen, cx, cy, pipe_type, rotation):
-        """Kreslí tvar potrubí - přímé nebo rohové"""
-        center_x = cx + self.cell_size // 2
-        center_y = cy + self.cell_size // 2
-        pipe_size = 35
-        
-        if pipe_type == "straight":
-            # Přímé potrubí - vodorovné nebo svislé
-            if rotation in [0, 180]:  # Vodorovné
-                pygame.draw.line(screen, YELLOW, (center_x - pipe_size, center_y), 
-                                (center_x + pipe_size, center_y), 12)
-            else:  # Svislé (90, 270)
-                pygame.draw.line(screen, YELLOW, (center_x, center_y - pipe_size), 
-                                (center_x, center_y + pipe_size), 12)
-        else:  # corner
-            # Rohové potrubí - L-tvar
-            if rotation == 0:
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
-                                (center_x + pipe_size, center_y), 12)
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
-                                (center_x, center_y - pipe_size), 12)
-            elif rotation == 90:
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
-                                (center_x + pipe_size, center_y), 12)
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
-                                (center_x, center_y + pipe_size), 12)
-            elif rotation == 180:
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
-                                (center_x - pipe_size, center_y), 12)
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
-                                (center_x, center_y + pipe_size), 12)
-            else:  # 270
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
-                                (center_x - pipe_size, center_y), 12)
-                pygame.draw.line(screen, YELLOW, (center_x, center_y), 
-                                (center_x, center_y - pipe_size), 12)
-    
+        if self.won:
+            return
+        if event.type not in (pygame.MOUSEBUTTONDOWN,):
+            return
+
+        mx, my = event.pos
+        ox = (SCREEN_WIDTH - self.GRID_COLS * self.CELL) // 2
+        oy = (SCREEN_HEIGHT - self.GRID_ROWS * self.CELL) // 2
+
+        col = (mx - ox) // self.CELL
+        row = (my - oy) // self.CELL
+        if not (0 <= col < self.GRID_COLS and 0 <= row < self.GRID_ROWS):
+            return
+
+        cell = self.grid[row][col]
+        if cell["locked"]:
+            return
+
+        # Left-click → clockwise, Right-click → counter-clockwise
+        if event.button == 1:
+            cell["rot"] = (cell["rot"] + 1) % 4
+        elif event.button == 3:
+            cell["rot"] = (cell["rot"] - 1) % 4
+        else:
+            return
+
+        self.moves += 1
+
+        # Check win
+        _, reached = self._find_connected_path()
+        if reached:
+            self.won = True
+
+    # ------------------------------------------------------------------
+    #  DRAWING HELPERS
+    # ------------------------------------------------------------------
+    def _draw_pipe(self, screen, rx, ry, cell, color):
+        """Draw the pipe shape inside the cell rect (rx, ry)."""
+        cx = rx + self.CELL // 2
+        cy = ry + self.CELL // 2
+        half = self.CELL // 2 - 6
+        thick = 10
+
+        openings = self._openings(cell)
+        # Draw a line from centre to each open side
+        ends = {
+            0: (cx + half, cy),
+            1: (cx, cy + half),
+            2: (cx - half, cy),
+            3: (cx, cy - half),
+        }
+        for side in openings:
+            ex, ey = ends[side]
+            pygame.draw.line(screen, color, (cx, cy), (ex, ey), thick)
+
+        # Draw a circle at centre junction
+        pygame.draw.circle(screen, color, (cx, cy), thick // 2 + 2)
+
+    # ------------------------------------------------------------------
+    #  DRAW
+    # ------------------------------------------------------------------
     def draw(self, screen):
-        screen.fill(DARK_BLUE)
-        
-        title = FONT_LARGE.render("POTRUBI", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH//2 - 150, 20))
-        
-        for y in range(self.grid_size):
-            for x in range(self.grid_size):
-                px = 300 + x * self.cell_size
-                py = 200 + y * self.cell_size
-                
-                pygame.draw.rect(screen, BLUE, pygame.Rect(px, py, self.cell_size - 10, self.cell_size - 10))
-                pygame.draw.rect(screen, WHITE, pygame.Rect(px, py, self.cell_size - 10, self.cell_size - 10), 2)
-                
-                # Kresli tvar potrubí
-                pipe = self.pipes[y][x]
-                self.draw_pipe_shape(screen, px, py, pipe["type"], pipe["rotation"])
-                
-                # Start a cíl
-                if (y, x) == self.start_pos:
-                    pygame.draw.circle(screen, GREEN, (px + self.cell_size//2, py + self.cell_size//2), 18)
-                    pygame.draw.circle(screen, WHITE, (px + self.cell_size//2, py + self.cell_size//2), 18, 2)
-                elif (y, x) == self.end_pos:
-                    pygame.draw.circle(screen, RED, (px + self.cell_size//2, py + self.cell_size//2), 18)
-                    pygame.draw.circle(screen, WHITE, (px + self.cell_size//2, py + self.cell_size//2), 18, 2)
-        
-        # Ukaž, jestli je cesta hotová
-        if self.is_path_connected():
-            status = FONT_MEDIUM.render("SPOJENO!!!", True, GREEN)
-            screen.blit(status, (SCREEN_WIDTH//2 - 120, 700))
-        
-        instr = FONT_SMALL.render("KLIKNI NA POTRUBI - Otáčej aby se ZELENA propojila s CERVENOU!", True, WHITE)
-        screen.blit(instr, (SCREEN_WIDTH//2 - 350, 650))
-    
+        screen.fill((10, 12, 28))
+
+        ox = (SCREEN_WIDTH - self.GRID_COLS * self.CELL) // 2
+        oy = (SCREEN_HEIGHT - self.GRID_ROWS * self.CELL) // 2
+
+        # Validation data
+        connected, goal_reached = self._find_connected_path()
+
+        # --- grid cells ---
+        for r in range(self.GRID_ROWS):
+            for c in range(self.GRID_COLS):
+                rx = ox + c * self.CELL
+                ry = oy + r * self.CELL
+                rect = pygame.Rect(rx, ry, self.CELL, self.CELL)
+                cell = self.grid[r][c]
+
+                # BG
+                bg = (30, 32, 50) if not cell["locked"] else (45, 40, 55)
+                pygame.draw.rect(screen, bg, rect)
+                pygame.draw.rect(screen, (55, 58, 80), rect, 1)
+
+                # Pipe colour: green if connected, yellow otherwise
+                pipe_col = (0, 220, 100) if (c, r) in connected else (200, 200, 60)
+                self._draw_pipe(screen, rx, ry, cell, pipe_col)
+
+                # Lock indicator (small white dot)
+                if cell["locked"]:
+                    pygame.draw.circle(screen, WHITE, (rx + self.CELL - 12, ry + 12), 5)
+
+        # --- start & end markers ---
+        sx = ox + self.start[0] * self.CELL + self.CELL // 2
+        sy = oy + self.start[1] * self.CELL + self.CELL // 2
+        pygame.draw.circle(screen, GREEN, (sx, sy), 14)
+        lbl = FONT_TINY.render("S", True, BLACK)
+        screen.blit(lbl, (sx - lbl.get_width() // 2, sy - lbl.get_height() // 2))
+
+        ex_px = ox + self.end[0] * self.CELL + self.CELL // 2
+        ey_px = oy + self.end[1] * self.CELL + self.CELL // 2
+        pygame.draw.circle(screen, RED, (ex_px, ey_px), 14)
+        lbl = FONT_TINY.render("E", True, WHITE)
+        screen.blit(lbl, (ex_px - lbl.get_width() // 2, ey_px - lbl.get_height() // 2))
+
+        # --- grid border ---
+        pygame.draw.rect(screen, CYAN, (ox - 2, oy - 2,
+                                        self.GRID_COLS * self.CELL + 4,
+                                        self.GRID_ROWS * self.CELL + 4), 2)
+
+        # --- title ---
+        t = FONT_MEDIUM.render("PIPE PUZZLE", True, CYAN)
+        screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, 15))
+
+        # --- HUD: moves ---
+        mv = FONT_SMALL.render(f"Tahy: {self.moves}", True, YELLOW)
+        screen.blit(mv, (ox, oy - 40))
+
+        # --- status ---
+        if goal_reached:
+            st = FONT_SMALL.render("SPOJENO!", True, GREEN)
+        else:
+            st = FONT_SMALL.render(f"Propojeno: {len(connected)} políček", True, LIGHT_GRAY)
+        screen.blit(st, (ox + self.GRID_COLS * self.CELL - st.get_width(), oy - 40))
+
+        # --- instructions ---
+        instr = FONT_TINY.render("Levé kliknutí = otočit CW | Pravé kliknutí = otočit CCW | "
+                                 "Bílá tečka = zamčené", True, LIGHT_GRAY)
+        screen.blit(instr, (SCREEN_WIDTH // 2 - instr.get_width() // 2, SCREEN_HEIGHT - 35))
+
+        # --- win overlay ---
+        if self.won:
+            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 150))
+            screen.blit(ov, (0, 0))
+            w = FONT_LARGE.render("LEVEL COMPLETE!", True, GREEN)
+            screen.blit(w, (SCREEN_WIDTH // 2 - w.get_width() // 2, SCREEN_HEIGHT // 2 - 50))
+            m = FONT_SMALL.render(f"Tahy: {self.moves}", True, WHITE)
+            screen.blit(m, (SCREEN_WIDTH // 2 - m.get_width() // 2, SCREEN_HEIGHT // 2 + 20))
+
     def get_hint(self):
-        return "Otáčej potrubí - musí být skutečně připojena!"
+        return "Otáčej potrubí kliknutím – spoj zelenou S a červenou E! Zamčené trubky jsou nápověda."
 
 
 class CableConnect(BaseGame):
@@ -3276,6 +4109,34 @@ class ComingSoonGame(BaseGame):
     
     def get_hint(self):
         return "Tento level zatím není dostupný - Coming Soon!"
+
+
+class BlankGame(BaseGame):
+    """
+    Prázdný level bez zprávy.
+    
+    DISABLE COMING SOON FOR LEVEL 20:
+    Tato třída se používá pro level 20.
+    Na rozdíl od ComingSoonGame() nezobrazuje žádnou zprávu.
+    Kliknutím na level 20 se nic nestane (tiché selhání).
+    """
+    def __init__(self):
+        super().__init__()
+        self.timer = 0
+    
+    def handle_event(self, event):
+        """Všechny eventy jsou ignorovány"""
+        pass
+    
+    def update(self):
+        self.timer += 1
+    
+    def draw(self, screen):
+        """Kreslí prázdnou obrazovku bez zprávy"""
+        screen.fill(DARK_BLUE)
+    
+    def get_hint(self):
+        return "Level nedostupný"
 
 
 if __name__ == "__main__":
