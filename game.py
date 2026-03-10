@@ -12,7 +12,7 @@ pygame.init()
 # =====================================
 # VERSION SYSTEM FIX
 # =====================================
-GAME_VERSION = "1.7.0"
+GAME_VERSION = "1.8.0"
 
 SCREEN_WIDTH = 1924
 SCREEN_HEIGHT = 1080
@@ -107,20 +107,30 @@ class Game:
         
         self.patch_notes = [
             {
+                "version": "1.8.0",
+                "notes": [
+                    "Added Quantum Switches (Level 15)",
+                    "Added Cipher Breaker (Level 16)",
+                    "Added Rolling Balls (Level 20)",
+                    "Hangman: hint hidden until 2x SPACE",
+                    "20 levels total"
+                ]
+            },
+            {
                 "version": "1.7.0",
                 "notes": [
-                    "Added Word Unscrambler (Level 19)",
+                    "Added Word Unscrambler",
+                    "Reordered levels by difficulty",
                     "Graphics settings expansion",
-                    "Resolution, fullscreen, VSync options",
                     "Bug fixes and improvements"
                 ]
             },
             {
                 "version": "1.6.0",
                 "notes": [
-                    "Added Laser Mirrors (Level 17)",
-                    "Added Cable Connect (Level 18)",
-                    "Added Pipe Rotate (Level 16)",
+                    "Added Laser Mirrors",
+                    "Added Cable Connect",
+                    "Added Pipe Rotate",
                     "UI improvements"
                 ]
             }
@@ -258,8 +268,8 @@ class Game:
         self.create_level_buttons()
         
     def create_level_buttons(self):
-        """Vytvoří tlačítka pro všech 19 levelů"""
-        for i in range(1, 20):
+        """Vytvoří tlačítka pro všech 20 levelů"""
+        for i in range(1, 21):
             col = (i - 1) % 5
             row = (i - 1) // 5
             x = 150 + col * 180
@@ -519,27 +529,47 @@ class Game:
         self.pause_buttons["exit"].draw(self.screen)
     
     def draw_hint_popup(self):
-        """Kreslí hint popup"""
+        """Kreslí hint popup s word-wrapem"""
         overlay = pygame.Surface((self.screen_width, self.screen_height))
         overlay.set_alpha(180)
         overlay.fill(BLACK)
         self.screen.blit(overlay, (0, 0))
         
         hint_title = FONT_LARGE.render("NAPOVEDA", True, YELLOW)
-        hint_title_rect = hint_title.get_rect(center=(self.screen_width//2, 300))
+        hint_title_rect = hint_title.get_rect(center=(self.screen_width//2, 280))
         self.screen.blit(hint_title, hint_title_rect)
         
         hint = self.current_game.get_hint()
-        hint_text = FONT_MEDIUM.render(hint, True, GREEN)
-        hint_rect = hint_text.get_rect(center=(self.screen_width//2, 450))
+        # Word-wrap the hint into lines that fit on screen
+        max_chars = 55
+        words = hint.split()
+        lines = []
+        cur = ""
+        for w in words:
+            if len(cur) + len(w) + 1 <= max_chars:
+                cur = cur + " " + w if cur else w
+            else:
+                lines.append(cur)
+                cur = w
+        if cur:
+            lines.append(cur)
         
-        box_rect = pygame.Rect(hint_rect.x - 40, hint_rect.y - 20, hint_rect.width + 80, hint_rect.height + 40)
+        # Calculate box size
+        line_h = 42
+        total_h = len(lines) * line_h + 40
+        box_w = 900
+        box_y = 370
+        box_rect = pygame.Rect(self.screen_width//2 - box_w//2, box_y, box_w, total_h)
         pygame.draw.rect(self.screen, BLUE, box_rect)
         pygame.draw.rect(self.screen, CYAN, box_rect, 3)
-        self.screen.blit(hint_text, hint_rect)
+        
+        for i, line in enumerate(lines):
+            hint_text = FONT_MEDIUM.render(line, True, GREEN)
+            hint_rect = hint_text.get_rect(center=(self.screen_width//2, box_y + 20 + i * line_h + line_h//2))
+            self.screen.blit(hint_text, hint_rect)
         
         close_text = FONT_SMALL.render("Klikni kdekoliv pro zavreni", True, WHITE)
-        close_rect = close_text.get_rect(center=(self.screen_width//2, 600))
+        close_rect = close_text.get_rect(center=(self.screen_width//2, box_y + total_h + 40))
         self.screen.blit(close_text, close_rect)
     
     def handle_menu_click(self, pos):
@@ -709,30 +739,35 @@ class Game:
     
     def create_game_level(self, level_num):
         """Vytvoří hru pro daný level s detailním error handlingem"""
-        if level_num < 1 or level_num > 19:
-            print(f"❌ [ERROR] Level {level_num} neexistuje! Dostupné: 1-19")
+        if level_num < 1 or level_num > 20:
+            print(f"❌ [ERROR] Level {level_num} neexistuje! Dostupné: 1-20")
             return None
         
         game_creators = [
-            ("SimonSays", lambda: SimonSays()),
-            ("ColorBlind", lambda: ColorBlind()),
-            ("Maze", lambda: Maze()),
-            ("TetrisLite", lambda: TetrisLite()),
-            ("Pong", lambda: Game2048()),
-            ("ColorMatch", lambda: ColorMatch()),
-            ("RiddleGame", lambda: RiddleGame()),
-            ("SudokuLite", lambda: SudokuLite()),
-            ("MemoryCards", lambda: MemoryCards()),
-            ("Hangman", lambda: Hangman()),
-            ("RotatingImage", lambda: RotatingImage()),
-            ("SpeedClick", lambda: SpeedClick()),
-            ("TimeBomb", lambda: TimeBomb()),
-            ("NumberSort", lambda: NumberSort()),
-            ("ReactionTime", lambda: ReactionTime()),
-            ("PipeRotate", lambda: PipeRotate()),
-            ("LaserMirrors", lambda: LaserMirrors()),
-            ("CableConnect", lambda: CableConnect()),
-            ("WordUnscrambler", lambda: WordUnscrambler())  # Level 19 - Word Unscrambler game
+            # --- EASY (levels 1-5): simple mechanics, instant feedback ---
+            ("SpeedClick", lambda: SpeedClick()),          #  1 - just click fast
+            ("ReactionTime", lambda: ReactionTime()),      #  2 - wait & click
+            ("ColorMatch", lambda: ColorMatch()),           #  3 - match colors
+            ("ColorBlind", lambda: ColorBlind()),           #  4 - spot the odd color
+            ("NumberSort", lambda: NumberSort()),           #  5 - sort numbers in order
+            # --- MEDIUM (levels 6-10): memory & word knowledge ---
+            ("SimonSays", lambda: SimonSays()),             #  6 - remember sequences
+            ("MemoryCards", lambda: MemoryCards()),         #  7 - flip & match pairs
+            ("TimeBomb", lambda: TimeBomb()),               #  8 - defuse under pressure
+            ("Hangman", lambda: Hangman()),                 #  9 - guess word from riddles
+            ("WordUnscrambler", lambda: WordUnscrambler()), # 10 - unscramble letters
+            # --- HARD (levels 11-14): spatial & logic puzzles ---
+            ("Maze", lambda: Maze()),                       # 11 - navigate a maze
+            ("RotatingImage", lambda: RotatingImage()),     # 12 - rotate tiles
+            ("RiddleGame", lambda: RiddleGame()),           # 13 - solve riddles
+            ("TetrisLite", lambda: TetrisLite()),           # 14 - tetris gameplay
+            # --- VERY HARD (levels 15-20): multi-step reasoning ---
+            ("QuantumSwitches", lambda: QuantumSwitches()), # 15 - linked toggle switches
+            ("CipherBreaker", lambda: CipherBreaker()),     # 16 - Caesar cipher decode
+            ("PipeRotate", lambda: PipeRotate()),           # 17 - rotate pipes to connect
+            ("CableConnect", lambda: CableConnect()),       # 18 - cables with locks & decoys
+            ("LaserMirrors", lambda: LaserMirrors()),        # 19 - laser w/ portals & 8 mirrors
+            ("RollingBalls", lambda: RollingBalls()),       # 20 - tilt board, slide ball to goal
         ]
         
         try:
@@ -809,7 +844,7 @@ class Game:
                 if event.key == pygame.K_o:
                     self.admin_mode = not self.admin_mode
                     if self.admin_mode:
-                        self.unlocked_levels = 19
+                        self.unlocked_levels = 20
                     else:
                         self.unlocked_levels = 1
                 if self.state == GameState.GAME:
@@ -2773,7 +2808,7 @@ class ReactionTime(BaseGame):
 
 
 class Hangman(BaseGame):
-    """Guess word - Hangman with categories - NOW IN ENGLISH"""
+    """Guess word - Hangman with categories and riddle hints - NOW IN ENGLISH"""
     def __init__(self):
         super().__init__()
         self.categories = {
@@ -2782,14 +2817,48 @@ class Hangman(BaseGame):
             "COUNTRIES": ["FRANCE", "GERMANY", "JAPAN", "BRAZIL", "CANADA"],
             "SPORTS": ["TENNIS", "HOCKEY", "SOCCER", "BOXING", "SWIMMING"]
         }
+        self.riddles = {
+            "DOG": "Domesticated 15,000 years ago from wolves, this loyal companion can learn hundreds of words and sniff out diseases.",
+            "CAT": "Worshipped as gods in ancient Egypt, these silent hunters spend 70% of their lives sleeping.",
+            "BIRD": "The only living descendants of dinosaurs, some species can fly backwards while others swim but never take flight.",
+            "HORSE": "Alexander the Great's Bucephalus was one; they sleep standing up and can run within hours of birth.",
+            "ELEPHANT": "Earth's largest land mammal, it mourns its dead, fears bees, and its tusks are actually overgrown teeth.",
+            "PIZZA": "A dish that traveled from Naples to conquer the world, the Margherita variety was named after an Italian queen in 1889.",
+            "BREAD": "One of humanity's oldest prepared foods dating back 14,000 years, ancient Egyptians used it as currency.",
+            "CHEESE": "Accidentally discovered when milk was stored in animal stomachs, some aged varieties are legally alive with mites.",
+            "APPLE": "Newton allegedly discovered gravity thanks to one; its seeds contain a compound that converts to cyanide.",
+            "CHICKEN": "Descended from the jungle fowl of Southeast Asia, it outnumbers humans 3 to 1 on Earth.",
+            "FRANCE": "Home to a tower once hated by locals, a louvre that was a fortress, and the world's most visited country.",
+            "GERMANY": "A European nation central to both World Wars, famous for engineering, autobahns with no speed limit, and Oktoberfest.",
+            "JAPAN": "An island nation with more vending machines per capita than any other, where trains apologize for being seconds late.",
+            "BRAZIL": "Named after a tree, it hosts the world's largest carnival and contains 60% of the Amazon rainforest.",
+            "CANADA": "The world's second-largest country by area, it has more lakes than the rest of the world combined.",
+            "TENNIS": "A sport where 'love' means zero, originally played with bare hands in French monasteries.",
+            "HOCKEY": "A sport played on frozen water where a vulcanized rubber disc can travel over 170 km/h.",
+            "SOCCER": "The world's most popular sport; its biggest tournament was once decided by a 'Hand of God' goal.",
+            "BOXING": "Known as 'the sweet science', ancient Greeks wrapped their fists in leather strips to compete at Olympia.",
+            "SWIMMING": "Benjamin Franklin invented flippers for it; humans are the only primates that naturally enjoy doing it."
+        }
         self.category = random.choice(list(self.categories.keys()))
         self.word = random.choice(self.categories[self.category])
+        self.riddle = self.riddles.get(self.word, "")
         self.guessed = set()
         self.wrong = 0
         self.max_wrong = 6
+        self.hint_visible = False
+        self.hint_space_count = 0
+        self.hint_space_timer = 0
     
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
+            # Double-SPACE detection for hint toggle
+            if event.key == pygame.K_SPACE:
+                self.hint_space_count += 1
+                self.hint_space_timer = 25  # ~400ms at 60fps
+                if self.hint_space_count >= 2:
+                    self.hint_visible = not self.hint_visible
+                    self.hint_space_count = 0
+                return
             if event.unicode.isalpha():
                 letter = event.unicode.upper()
                 if letter not in self.guessed:
@@ -2802,6 +2871,12 @@ class Hangman(BaseGame):
                     if self.wrong >= self.max_wrong:
                         self.lost = True
     
+    def update(self):
+        if self.hint_space_timer > 0:
+            self.hint_space_timer -= 1
+        else:
+            self.hint_space_count = 0
+    
     def draw(self, screen):
         screen.fill(DARK_BLUE)
         title = FONT_LARGE.render("HANGMAN", True, CYAN)
@@ -2809,13 +2884,34 @@ class Hangman(BaseGame):
         
         cat_text = FONT_SMALL.render(f"Category: {self.category}", True, CYAN)
         screen.blit(cat_text, (SCREEN_WIDTH//2 - 150, 80))
-        
+
+        # Riddle hint (only visible after double-SPACE)
+        if self.riddle and self.hint_visible:
+            max_w = 80
+            words = self.riddle.split()
+            lines = []
+            cur = ""
+            for w in words:
+                if len(cur) + len(w) + 1 <= max_w:
+                    cur = cur + " " + w if cur else w
+                else:
+                    lines.append(cur)
+                    cur = w
+            if cur:
+                lines.append(cur)
+            for li, line in enumerate(lines):
+                rt = FONT_TINY.render(line, True, (200, 200, 255))
+                screen.blit(rt, (SCREEN_WIDTH//2 - rt.get_width()//2, 120 + li * 22))
+        elif not self.hint_visible:
+            ht = FONT_TINY.render("Napoveda: 2x SPACE", True, (120, 120, 150))
+            screen.blit(ht, (SCREEN_WIDTH//2 - ht.get_width()//2, 120))
+
         word_display = " ".join(l if l in self.guessed else "_" for l in self.word)
         word_text = FONT_LARGE.render(word_display, True, YELLOW)
-        screen.blit(word_text, (SCREEN_WIDTH//2 - 200, 200))
+        screen.blit(word_text, (SCREEN_WIDTH//2 - 200, 230))
         
         guessed_text = FONT_SMALL.render(f"Hádaná písmena: {' '.join(sorted(self.guessed))}", True, WHITE)
-        screen.blit(guessed_text, (SCREEN_WIDTH//2 - 300, 350))
+        screen.blit(guessed_text, (SCREEN_WIDTH//2 - 300, 380))
         
         wrong_text = FONT_MEDIUM.render(f"Chyby: {self.wrong}/{self.max_wrong}", True, RED)
         screen.blit(wrong_text, (SCREEN_WIDTH//2 - 150, 500))
@@ -3617,12 +3713,13 @@ class RotatingImage(BaseGame):
 
 
 class LaserMirrors(BaseGame):
-    """Laser Reflection Puzzle – nasměruj laser na cíl otáčením zrcadel na mřížce."""
+    """Laser Reflection Puzzle – nasměruj laser na cíl otáčením zrcadel na mřížce.
+    Advanced version with portals, 14 mirrors, and a winding 10-bounce solution."""
 
     # Grid dimensions and cell size
-    G_COLS = 10
-    G_ROWS = 8
-    CELL = 64
+    G_COLS = 12
+    G_ROWS = 10
+    CELL = 56
 
     # Directions: RIGHT, DOWN, LEFT, UP  (dx, dy)
     DIRS = [(1, 0), (0, 1), (-1, 0), (0, -1)]
@@ -3631,51 +3728,83 @@ class LaserMirrors(BaseGame):
         super().__init__()
 
         # Cursor position (grid coords)
-        self.cx = 4
-        self.cy = 3
+        self.cx = 6
+        self.cy = 5
 
-        # ------- puzzle layout -------
-        # Grid map (10 cols × 8 rows):
+        # ====== PUZZLE LAYOUT (12 cols × 10 rows) ======
         #
-        #   0  1  2  3  4  5  6  7  8  9
-        # 0 .  .  .  .  .  .  .  .  .  .
-        # 1 .  .  M3 .  .  .  .  M5 .  .
-        # 2 .  .  .  .  .  .  B  .  .  .
-        # 3 L→ .  .  .  M1 .  .  M4 .  .
-        # 4 .  .  .  .  .  B  .  .  .  .
-        # 5 .  .  .  .  M2 .  .  .  .  T
-        # 6 .  .  M6 B  .  .  B  .  .  .
-        # 7 .  .  .  .  .  .  .  .  .  .
+        #      0  1  2  3  4  5  6  7  8  9  10 11
+        #  0   .  .  B  .  .  .  B  .  .  B  .  .
+        #  1  L→ .  .  .  M1 .  .  M4 .  .  M5 .
+        #  2   .  .  B  .  .  .  B  .  D2 .  .  .
+        #  3   .  .  D1 B  .  .  B  .  .  B  .  D5
+        #  4   .  B  .  .  M2 .  .  M3 .  .  P→ .
+        #  5   .  .  .  B  .  .  .  .  B  .  .  .
+        #  6   B  .  .  D4 .  M8 .  .  .  .  .  T
+        #  7   .  P← .  B  .  .  B  B  .  D3 .  .
+        #  8   B  .  .  B  .  .  D6 .  B  .  .  .
+        #  9   .  M6 .  .  .  M7 .  .  .  B  .  B
         #
-        # Solution: set M1(4,3)="\" and M2(4,5)="\"
-        # Path: (0,3)→→→→(4,3)↓(4,4)↓(4,5)→→→→→(9,5) TARGET
+        # L = Laser emitter (RIGHT)   T = Target
+        # Mx = Solution mirror (8)     Dx = Decoy mirror (6)
+        # B = Wall    P = Portal pair (beam teleports, same direction)
+        #
+        # SOLUTION (rotate ALL 8 solution mirrors):
+        #   (0,1)→→→(4,1)[M1\]↓↓(4,4)[M2\]→→(7,4)[M3/]
+        #   ↑↑(7,1)[M4/]→→(10,1)[M5\]↓↓(10,4)[Portal]
+        #   ~~>(1,7)[Portal]↓(1,9)[M6\]→→→(5,9)[M7/]
+        #   ↑↑(5,6)[M8/]→→→→→(11,6) TARGET!
 
-        # Laser emitter: left edge, row 3, shoots RIGHT
-        self.emitter = (0, 3)
+        # Laser emitter: left edge, row 1, shoots RIGHT
+        self.emitter = (0, 1)
         self.emit_dir = 0                # index into DIRS → RIGHT
 
-        # Target: right edge, row 5
-        self.target = (9, 5)
+        # Target: right edge, row 6
+        self.target = (11, 6)
 
-        # Grid: None = empty, "block" = wall, dict = mirror
+        # Grid: None = empty, "block" = wall, dict = mirror/portal
         self.grid = [[None] * self.G_COLS for _ in range(self.G_ROWS)]
 
-        # Fixed walls / obstacles
-        walls = [(6, 2), (5, 4), (3, 6), (6, 6)]
+        # --- Fixed walls / obstacles (20 blocks) ---
+        walls = [
+            (2, 0), (6, 0), (9, 0),
+            (2, 2), (6, 2),
+            (3, 3), (6, 3), (9, 3),
+            (1, 4),
+            (3, 5), (8, 5),
+            (0, 6),
+            (3, 7), (6, 7), (7, 7),
+            (0, 8), (3, 8), (8, 8),
+            (9, 9), (11, 9),
+        ]
         for wx, wy in walls:
             self.grid[wy][wx] = "block"
 
-        # Mirrors – solution mirrors start WRONG so player must rotate them
-        # M1 & M2 are on the solution path; M3-M6 are decoys
-        mirrors = [
-            (4, 3, "/"),    # M1 – must become "\" for solution
-            (4, 5, "/"),    # M2 – must become "\" for solution
-            (2, 1, "/"),    # M3 – decoy (off path)
-            (7, 3, "\\"),   # M4 – decoy (after M1 deflection, laser never reaches col 7 on row 3)
-            (7, 1, "/"),    # M5 – decoy (off path)
-            (2, 6, "\\"),   # M6 – decoy (off path)
+        # --- Portal pair (beam enters one, exits the other, same direction) ---
+        self.grid[4][10] = {"type": "portal", "pair": (1, 7), "id": "A"}
+        self.grid[7][1]  = {"type": "portal", "pair": (10, 4), "id": "A"}
+
+        # --- Solution mirrors (ALL start in the WRONG orientation) ---
+        solution_mirrors = [
+            (4,  1, "/"),     # M1 – needs "\"   (RIGHT→DOWN)
+            (4,  4, "/"),     # M2 – needs "\"   (DOWN→RIGHT)
+            (7,  4, "\\"),    # M3 – needs "/"   (RIGHT→UP)
+            (7,  1, "\\"),    # M4 – needs "/"   (UP→RIGHT)
+            (10, 1, "/"),     # M5 – needs "\"   (RIGHT→DOWN)
+            (1,  9, "/"),     # M6 – needs "\"   (DOWN→RIGHT)
+            (5,  9, "\\"),    # M7 – needs "/"   (RIGHT→UP)
+            (5,  6, "\\"),    # M8 – needs "/"   (UP→RIGHT)
         ]
-        for mx, my, angle in mirrors:
+        # --- Decoy mirrors (red herrings – off the solution path) ---
+        decoy_mirrors = [
+            (2,  3, "/"),     # D1
+            (8,  2, "\\"),    # D2
+            (9,  7, "/"),     # D3
+            (3,  6, "\\"),    # D4
+            (11, 3, "/"),     # D5
+            (6,  8, "\\"),    # D6
+        ]
+        for mx, my, angle in solution_mirrors + decoy_mirrors:
             self.grid[my][mx] = {"type": "mirror", "angle": angle}
 
         # Precompute laser path
@@ -3704,9 +3833,7 @@ class LaserMirrors(BaseGame):
         d = self.emit_dir
         visited = set()
 
-        # The beam starts *entering* the emitter cell
-        for _ in range(200):  # safety limit
-            # Record that we're in this cell going this direction
+        for _ in range(300):  # safety limit
             state = (x, y, d)
             if state in visited:
                 break  # infinite loop detected
@@ -3723,8 +3850,21 @@ class LaserMirrors(BaseGame):
             cell = self.grid[y][x]
             if cell == "block":
                 break  # absorbed by wall
-            if isinstance(cell, dict) and cell["type"] == "mirror":
-                d = self._reflect(d, cell["angle"])
+
+            if isinstance(cell, dict):
+                if cell["type"] == "mirror":
+                    d = self._reflect(d, cell["angle"])
+                elif cell["type"] == "portal":
+                    # Teleport to paired portal, keep same direction
+                    px, py = cell["pair"]
+                    self.laser_path.append((px, py))
+                    x, y = px, py
+                    dx, dy = self.DIRS[d]
+                    nx, ny = x + dx, y + dy
+                    if nx < 0 or nx >= self.G_COLS or ny < 0 or ny >= self.G_ROWS:
+                        break
+                    x, y = nx, ny
+                    continue
 
             # Move to next cell
             dx, dy = self.DIRS[d]
@@ -3755,8 +3895,8 @@ class LaserMirrors(BaseGame):
         elif event.key in (pygame.K_DOWN, pygame.K_s):
             self.cy = min(self.G_ROWS - 1, self.cy + 1)
 
-        # Rotate mirror under cursor (Space or R)
-        elif event.key in (pygame.K_SPACE, pygame.K_r):
+        # Rotate mirror under cursor (R only)
+        elif event.key == pygame.K_r:
             cell = self.grid[self.cy][self.cx]
             if isinstance(cell, dict) and cell["type"] == "mirror":
                 cell["angle"] = "\\" if cell["angle"] == "/" else "/"
@@ -3790,7 +3930,7 @@ class LaserMirrors(BaseGame):
 
                 # Mirror
                 if isinstance(cell, dict) and cell["type"] == "mirror":
-                    pad = 10
+                    pad = 8
                     if cell["angle"] == "/":
                         pygame.draw.line(screen, YELLOW,
                                          (rx + pad, ry + self.CELL - pad),
@@ -3800,17 +3940,29 @@ class LaserMirrors(BaseGame):
                                          (rx + pad, ry + pad),
                                          (rx + self.CELL - pad, ry + self.CELL - pad), 4)
 
+                # Portal
+                if isinstance(cell, dict) and cell["type"] == "portal":
+                    cx_p = rx + self.CELL // 2
+                    cy_p = ry + self.CELL // 2
+                    pygame.draw.circle(screen, (180, 0, 255), (cx_p, cy_p),
+                                       self.CELL // 3, 3)
+                    pygame.draw.circle(screen, (220, 100, 255), (cx_p, cy_p),
+                                       self.CELL // 5)
+                    lbl = FONT_TINY.render("P", True, WHITE)
+                    screen.blit(lbl, (cx_p - lbl.get_width() // 2,
+                                      cy_p - lbl.get_height() // 2))
+
         # --- emitter ---
         ex = ox + self.emitter[0] * self.CELL + self.CELL // 2
         ey = oy + self.emitter[1] * self.CELL + self.CELL // 2
-        pygame.draw.circle(screen, GREEN, (ex, ey), 16)
+        pygame.draw.circle(screen, GREEN, (ex, ey), 14)
         lbl = FONT_TINY.render("L", True, BLACK)
         screen.blit(lbl, (ex - lbl.get_width() // 2, ey - lbl.get_height() // 2))
 
         # --- target ---
         tx = ox + self.target[0] * self.CELL + self.CELL // 2
         ty = oy + self.target[1] * self.CELL + self.CELL // 2
-        pygame.draw.circle(screen, RED, (tx, ty), 16)
+        pygame.draw.circle(screen, RED, (tx, ty), 14)
         lbl = FONT_TINY.render("T", True, WHITE)
         screen.blit(lbl, (tx - lbl.get_width() // 2, ty - lbl.get_height() // 2))
 
@@ -3820,8 +3972,13 @@ class LaserMirrors(BaseGame):
         for i in range(len(self.laser_path) - 1):
             ax, ay = self.laser_path[i]
             bx, by = self.laser_path[i + 1]
-            p1 = (ox + ax * self.CELL + self.CELL // 2, oy + ay * self.CELL + self.CELL // 2)
-            p2 = (ox + bx * self.CELL + self.CELL // 2, oy + by * self.CELL + self.CELL // 2)
+            # Skip drawing across portal jumps (non-adjacent cells)
+            if abs(ax - bx) + abs(ay - by) > 1:
+                continue
+            p1 = (ox + ax * self.CELL + self.CELL // 2,
+                  oy + ay * self.CELL + self.CELL // 2)
+            p2 = (ox + bx * self.CELL + self.CELL // 2,
+                  oy + by * self.CELL + self.CELL // 2)
             pygame.draw.line(screen, beam_color, p1, p2, 4)
             pygame.draw.line(screen, glow_color, p1, p2, 2)
 
@@ -3834,9 +3991,17 @@ class LaserMirrors(BaseGame):
         title = FONT_MEDIUM.render("LASER REFLECTION", True, CYAN)
         screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 20))
 
+        # --- info bar ---
+        mirror_count = sum(1 for row in self.grid for c in row
+                           if isinstance(c, dict) and c.get("type") == "mirror")
+        info = FONT_TINY.render(
+            f"ZRCADEL: {mirror_count}  |  PORTÁLY: 1 pár", True, (180, 180, 200))
+        screen.blit(info, (SCREEN_WIDTH // 2 - info.get_width() // 2, 60))
+
         # --- instructions ---
-        instr = FONT_TINY.render("ŠIPKY/WASD = pohyb kurzoru | SPACE/R = otočit zrcadlo | "
-                                 "Nasměruj laser (zelený) na cíl (červený)", True, LIGHT_GRAY)
+        instr = FONT_TINY.render(
+            "ŠIPKY/WASD = pohyb  |  R = otočit zrcadlo  |  "
+            "Nasměruj laser přes portály na cíl!", True, LIGHT_GRAY)
         screen.blit(instr, (SCREEN_WIDTH // 2 - instr.get_width() // 2, SCREEN_HEIGHT - 40))
 
         # --- win overlay ---
@@ -3848,7 +4013,7 @@ class LaserMirrors(BaseGame):
             screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
 
     def get_hint(self):
-        return "Otáčej zrcadla (Space/R) a nasměruj laser na červený cíl!"
+        return "Otoč SPRÁVNÁ zrcadla a nasměruj laser přes portály na cíl. Pozor – některá zrcadla jsou návnady!"
 
 
 class FindDifferences(BaseGame):
@@ -4350,120 +4515,691 @@ class PipeRotate(BaseGame):
 
 
 class CableConnect(BaseGame):
-    """Spoj barevné kabely - OPRAVENÉ S BAREVNÝMI KOLEČKY A VALIDACÍ"""
+    """Spoj barevné kabely – HARD: 6 párů, 2 návnady, zámky, 3 pokusy."""
+
+    # 6 real colors + 2 decoy colors
+    ALL_COLORS = [
+        (255, 0, 0),      # 0 RED
+        (0, 200, 0),      # 1 GREEN
+        (0, 100, 255),    # 2 BLUE
+        (255, 255, 0),    # 3 YELLOW
+        (0, 255, 255),    # 4 CYAN
+        (255, 0, 255),    # 5 MAGENTA
+        (255, 140, 0),    # 6 ORANGE  (decoy)
+        (160, 0, 255),    # 7 PURPLE  (decoy)
+    ]
+    ALL_NAMES = ["CERV", "ZEL", "MODR", "ZLUT", "CYAN", "MAG", "ORAN", "FIAL"]
+
+    NUM_PAIRS = 6     # real cable pairs
+    NUM_RIGHT = 8     # 6 real + 2 decoys on the right side
+
     def __init__(self):
         super().__init__()
-        self.cables = 4
-        self.left_cables = list(range(self.cables))  # [0=RED, 1=GREEN, 2=BLUE, 3=YELLOW]
-        self.right_cables = list(range(self.cables))
+
+        # Left side: one node per real color (indices 0-5)
+        self.left_cables = list(range(self.NUM_PAIRS))
+
+        # Right side: all 8 colours, shuffled
+        self.right_cables = list(range(self.NUM_RIGHT))
         random.shuffle(self.right_cables)
-        self.connections = {}  # {left_index: right_index}
+
+        self.connections = {}   # {left_index: right_index}
+        self.used_right = set()
         self.selected = None
-        self.cable_colors = [RED, GREEN, BLUE, YELLOW]
-        self.cable_names = ["CERVENA", "ZELENA", "MODRA", "ZLUTA"]
-    
+
+        # Strikes
+        self.max_wrong = 3
+        self.wrong_count = 0
+
+        # Lock rules: right-side colour 4 (CYAN) unlocks after colour 0 (RED) is connected,
+        #             right-side colour 5 (MAG)  unlocks after colour 2 (BLUE) is connected.
+        self.lock_prereqs = {4: 0, 5: 2}
+
+        # Flash feedback
+        self.flash_timer = 0
+        self.flash_color = (255, 255, 255)
+        self.flash_msg = ""
+
+    # ---- helpers --------------------------------------------------------
+    def _is_locked(self, right_color_id):
+        if right_color_id not in self.lock_prereqs:
+            return False
+        prereq = self.lock_prereqs[right_color_id]
+        for li in self.connections:
+            if self.left_cables[li] == prereq:
+                return False
+        return True
+
+    def _flash(self, msg, color, duration=60):
+        self.flash_msg = msg
+        self.flash_color = color
+        self.flash_timer = duration
+
+    def _strike(self, msg):
+        self.wrong_count += 1
+        self._flash(msg, (255, 50, 50), 70)
+        if self.wrong_count >= self.max_wrong:
+            self.lost = True
+
+    # ---- connection attempt ---------------------------------------------
+    def _try_connect(self, left_i, right_i):
+        if left_i in self.connections or right_i in self.used_right:
+            self._flash("UZ SPOJENO!", (255, 160, 0))
+            return
+
+        rc = self.right_cables[right_i]
+
+        if self._is_locked(rc):
+            self._strike("ZAMCENO! Spoj nejdriv prerequisitu.")
+            return
+
+        lc = self.left_cables[left_i]
+        if lc != rc:
+            self._strike("SPATNA BARVA!")
+            return
+
+        # success
+        self.connections[left_i] = right_i
+        self.used_right.add(right_i)
+        self._flash("SPOJENO!", (0, 255, 80), 40)
+
+        if len(self.connections) == self.NUM_PAIRS:
+            self.won = True
+
+    # ---- events ---------------------------------------------------------
     def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            pos = event.pos
-            # Vlevo
-            for i in range(self.cables):
-                x, y = 300, 250 + i * 120
-                if pygame.Rect(x - 35, y - 35, 70, 70).collidepoint(pos):
-                    if self.selected is None:
-                        self.selected = ("left", i)
-                    elif self.selected[0] == "right":
-                        # Propoj kabely - kontroluj barvy!
-                        right_i = self.selected[1]
-                        if self.left_cables[i] == self.right_cables[right_i]:
-                            self.connections[i] = right_i
-                            self.selected = None
-                            # Ověř výhru
-                            if len(self.connections) == self.cables:
-                                self.won = True
-                        else:
-                            self.selected = ("left", i)
-                    else:
-                        self.selected = ("left", i)
-            
-            # Vpravo
-            for i in range(self.cables):
-                x, y = SCREEN_WIDTH - 300, 250 + i * 120
-                if pygame.Rect(x - 35, y - 35, 70, 70).collidepoint(pos):
-                    if self.selected is None:
-                        self.selected = ("right", i)
-                    elif self.selected[0] == "left":
-                        # Propoj kabely - kontroluj barvy!
-                        left_i = self.selected[1]
-                        if self.left_cables[left_i] == self.right_cables[i]:
-                            self.connections[left_i] = i
-                            self.selected = None
-                            # Ověř výhru
-                            if len(self.connections) == self.cables:
-                                self.won = True
-                        else:
-                            self.selected = ("right", i)
-                    else:
-                        self.selected = ("right", i)
-    
+        if event.type != pygame.MOUSEBUTTONDOWN:
+            return
+        if self.won or self.lost:
+            return
+
+        pos = event.pos
+
+        # Left nodes
+        for i in range(self.NUM_PAIRS):
+            x, y = 350, 190 + i * 100
+            if pygame.Rect(x - 35, y - 35, 70, 70).collidepoint(pos):
+                if i in self.connections:
+                    break
+                if self.selected and self.selected[0] == "right":
+                    self._try_connect(i, self.selected[1])
+                    self.selected = None
+                else:
+                    self.selected = ("left", i)
+                return
+
+        # Right nodes
+        for i in range(self.NUM_RIGHT):
+            x, y = SCREEN_WIDTH - 350, 155 + i * 88
+            if pygame.Rect(x - 35, y - 35, 70, 70).collidepoint(pos):
+                if i in self.used_right:
+                    break
+                if self.selected and self.selected[0] == "left":
+                    self._try_connect(self.selected[1], i)
+                    self.selected = None
+                else:
+                    self.selected = ("right", i)
+                return
+
+    def update(self):
+        if self.flash_timer > 0:
+            self.flash_timer -= 1
+
+    # ---- drawing --------------------------------------------------------
+    def _node_pos_left(self, i):
+        return 350, 190 + i * 100
+
+    def _node_pos_right(self, i):
+        return SCREEN_WIDTH - 350, 155 + i * 88
+
     def draw(self, screen):
         screen.fill(DARK_BLUE)
-        
+
         title = FONT_LARGE.render("KABELY", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH//2 - 150, 30))
-        
-        # Vlevo
-        for i in range(self.cables):
-            x, y = 300, 250 + i * 120
-            cable_idx = self.left_cables[i]
-            color = self.cable_colors[cable_idx]
-            is_selected = self.selected == ("left", i)
-            border_color = YELLOW if is_selected else WHITE
-            border_width = 5 if is_selected else 3
-            
-            # Větší kruh s barvou kabelu
-            pygame.draw.circle(screen, color, (x, y), 28)
-            pygame.draw.circle(screen, border_color, (x, y), 28, border_width)
-            
-            # Jméno barvy
-            label = FONT_TINY.render(self.cable_names[cable_idx], True, BLACK)
-            label_rect = label.get_rect(center=(x, y))
-            screen.blit(label, label_rect)
-        
-        # Vpravo
-        for i in range(self.cables):
-            x, y = SCREEN_WIDTH - 300, 250 + i * 120
-            cable_idx = self.right_cables[i]
-            color = self.cable_colors[cable_idx]
-            is_selected = self.selected == ("right", i)
-            border_color = YELLOW if is_selected else WHITE
-            border_width = 5 if is_selected else 3
-            
-            # Větší kruh s barvou kabelu
-            pygame.draw.circle(screen, color, (x, y), 28)
-            pygame.draw.circle(screen, border_color, (x, y), 28, border_width)
-            
-            # Jméno barvy
-            label = FONT_TINY.render(self.cable_names[cable_idx], True, BLACK)
-            label_rect = label.get_rect(center=(x, y))
-            screen.blit(label, label_rect)
-        
-        # Čáry spojů (s barvou kabelu)
-        for left_i, right_i in self.connections.items():
-            x1, y1 = 300, 250 + left_i * 120
-            x2, y2 = SCREEN_WIDTH - 300, 250 + right_i * 120
-            # Čára má barvu levého kabelu
-            line_color = self.cable_colors[self.left_cables[left_i]]
-            pygame.draw.line(screen, line_color, (x1, y1), (x2, y2), 5)
-        
-        # Počítadlo
-        connected = FONT_SMALL.render(f"Připojeno: {len(self.connections)}/{self.cables}", True, YELLOW)
-        screen.blit(connected, (SCREEN_WIDTH//2 - 150, 750))
-        
-        instr = FONT_SMALL.render("KLIKNI VLEVO, PAK VPRAVO - Spoj stejne BARVY!", True, WHITE)
-        screen.blit(instr, (SCREEN_WIDTH//2 - 250, 700))
-    
+        screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 15))
+
+        # Strikes bar
+        strikes = "X " * self.wrong_count + "O " * (self.max_wrong - self.wrong_count)
+        sc = RED if self.wrong_count >= 2 else WHITE
+        st = FONT_SMALL.render(f"Pokusy: {strikes.strip()}", True, sc)
+        screen.blit(st, (SCREEN_WIDTH // 2 - st.get_width() // 2, 70))
+
+        # -- left nodes --
+        for i in range(self.NUM_PAIRS):
+            x, y = self._node_pos_left(i)
+            ci = self.left_cables[i]
+            color = self.ALL_COLORS[ci]
+            done = i in self.connections
+            sel = self.selected == ("left", i)
+
+            if done:
+                dim = (color[0] // 3, color[1] // 3, color[2] // 3)
+                pygame.draw.circle(screen, dim, (x, y), 28)
+                pygame.draw.circle(screen, (100, 100, 100), (x, y), 28, 2)
+            else:
+                pygame.draw.circle(screen, color, (x, y), 28)
+                bc = YELLOW if sel else WHITE
+                pygame.draw.circle(screen, bc, (x, y), 28, 5 if sel else 3)
+
+            lbl = FONT_TINY.render(self.ALL_NAMES[ci], True, BLACK if not done else GRAY)
+            screen.blit(lbl, lbl.get_rect(center=(x, y)))
+
+        # -- right nodes --
+        for i in range(self.NUM_RIGHT):
+            x, y = self._node_pos_right(i)
+            ci = self.right_cables[i]
+            color = self.ALL_COLORS[ci]
+            done = i in self.used_right
+            sel = self.selected == ("right", i)
+            locked = self._is_locked(ci)
+
+            if done:
+                dim = (color[0] // 3, color[1] // 3, color[2] // 3)
+                pygame.draw.circle(screen, dim, (x, y), 28)
+                pygame.draw.circle(screen, (100, 100, 100), (x, y), 28, 2)
+            elif locked:
+                pygame.draw.circle(screen, (50, 50, 60), (x, y), 28)
+                pygame.draw.circle(screen, (90, 90, 100), (x, y), 28, 3)
+                lt = FONT_TINY.render("LOCK", True, (140, 140, 160))
+                screen.blit(lt, lt.get_rect(center=(x, y)))
+            else:
+                pygame.draw.circle(screen, color, (x, y), 28)
+                bc = YELLOW if sel else WHITE
+                pygame.draw.circle(screen, bc, (x, y), 28, 5 if sel else 3)
+                lbl = FONT_TINY.render(self.ALL_NAMES[ci], True, BLACK)
+                screen.blit(lbl, lbl.get_rect(center=(x, y)))
+
+        # -- connection lines --
+        for li, ri in self.connections.items():
+            x1, y1 = self._node_pos_left(li)
+            x2, y2 = self._node_pos_right(ri)
+            lc = self.ALL_COLORS[self.left_cables[li]]
+            pygame.draw.line(screen, lc, (x1, y1), (x2, y2), 5)
+
+        # -- flash message --
+        if self.flash_timer > 0 and self.flash_msg:
+            ft = FONT_MEDIUM.render(self.flash_msg, True, self.flash_color)
+            screen.blit(ft, (SCREEN_WIDTH // 2 - ft.get_width() // 2,
+                             SCREEN_HEIGHT // 2 + 220))
+
+        # -- on-screen rules panel (right edge) --
+        rules = [
+            "PRAVIDLA:",
+            "1. Spoj stejne barvy",
+            "2. ORAN + FIAL = navnady!",
+            "3. CYAN: odemkni CERV",
+            "4. MAG: odemkni MODR",
+            f"5. Max {self.max_wrong} chyby",
+        ]
+        ry_start = 190
+        for ri, rule in enumerate(rules):
+            rc = YELLOW if ri == 0 else (180, 180, 200)
+            rt = FONT_TINY.render(rule, True, rc)
+            screen.blit(rt, (SCREEN_WIDTH - 230, ry_start + ri * 24))
+
+        # -- counter --
+        ct = FONT_SMALL.render(
+            f"Pripojeno: {len(self.connections)}/{self.NUM_PAIRS}", True, YELLOW)
+        screen.blit(ct, (SCREEN_WIDTH // 2 - ct.get_width() // 2, SCREEN_HEIGHT - 80))
+
+        instr = FONT_TINY.render(
+            "KLIKNI VLEVO -> PAK VPRAVO  |  "
+            "Pozor na navnady a zamky!", True, LIGHT_GRAY)
+        screen.blit(instr, (SCREEN_WIDTH // 2 - instr.get_width() // 2,
+                            SCREEN_HEIGHT - 40))
+
+        # -- overlays --
+        if self.won:
+            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 150))
+            screen.blit(ov, (0, 0))
+            t = FONT_LARGE.render("KABELY SPOJENY!", True, GREEN)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2,
+                            SCREEN_HEIGHT // 2 - 40))
+
+        if self.lost:
+            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 150))
+            screen.blit(ov, (0, 0))
+            t = FONT_LARGE.render("PRILIS MNOHO CHYB!", True, RED)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2,
+                            SCREEN_HEIGHT // 2 - 40))
+
     def get_hint(self):
-        return "Spoj kabely podle BAREV - cervena s cervenou, zelena se zelenou!"
+        return "ORAN a FIAL jsou navnady! Spoj CERV pred CYAN, MODR pred MAG."
+
+
+# =====================================================================
+#  LEVEL 15 — QUANTUM SWITCHES
+# =====================================================================
+class QuantumSwitches(BaseGame):
+    """Quantum Switches – activate switches in the right sequence.
+    Each switch toggles itself AND specific linked switches."""
+
+    NUM_SW = 7
+    # Link map: pressing switch i also toggles switches in LINKS[i]
+    LINKS = {
+        0: [2, 5],
+        1: [3],
+        2: [0, 4],
+        3: [1, 6],
+        4: [2, 5],
+        5: [0, 4, 6],
+        6: [3, 5],
+    }
+    # Goal: all ON
+    # Known solution order: 1, 4, 0, 6 (verified)
+
+    def __init__(self):
+        super().__init__()
+        self.switches = [False] * self.NUM_SW
+        self.press_count = 0
+        self.max_presses = 12  # par = 4, generous limit = 12
+        self.flash_msg = ""
+        self.flash_timer = 0
+
+    def _toggle(self, idx):
+        self.switches[idx] = not self.switches[idx]
+        for linked in self.LINKS.get(idx, []):
+            self.switches[linked] = not self.switches[linked]
+
+    def handle_event(self, event):
+        if event.type != pygame.MOUSEBUTTONDOWN or self.won or self.lost:
+            return
+        pos = event.pos
+        ox = (SCREEN_WIDTH - self.NUM_SW * 120) // 2
+        for i in range(self.NUM_SW):
+            cx = ox + i * 120 + 50
+            cy = SCREEN_HEIGHT // 2
+            if (pos[0] - cx) ** 2 + (pos[1] - cy) ** 2 <= 45 ** 2:
+                self._toggle(i)
+                self.press_count += 1
+                if all(self.switches):
+                    self.won = True
+                    return
+                if self.press_count >= self.max_presses:
+                    self.lost = True
+                    self.flash_msg = "PRILIS MNOHO TAHU!"
+                    self.flash_timer = 120
+                return
+
+    def update(self):
+        if self.flash_timer > 0:
+            self.flash_timer -= 1
+
+    def draw(self, screen):
+        screen.fill((12, 12, 30))
+
+        title = FONT_LARGE.render("QUANTUM SWITCHES", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 30))
+
+        goal = FONT_SMALL.render("CIL: Rozsviť všechny přepínače!", True, YELLOW)
+        screen.blit(goal, (SCREEN_WIDTH // 2 - goal.get_width() // 2, 100))
+
+        ox = (SCREEN_WIDTH - self.NUM_SW * 120) // 2
+
+        # Draw link lines first (behind circles)
+        for i, linked in self.LINKS.items():
+            cx1 = ox + i * 120 + 50
+            cy1 = SCREEN_HEIGHT // 2
+            for j in linked:
+                if j > i:  # draw each link once
+                    cx2 = ox + j * 120 + 50
+                    cy2 = SCREEN_HEIGHT // 2
+                    pygame.draw.line(screen, (50, 50, 80), (cx1, cy1), (cx2, cy2), 2)
+
+        # Draw switches
+        for i in range(self.NUM_SW):
+            cx = ox + i * 120 + 50
+            cy = SCREEN_HEIGHT // 2
+            color = (0, 220, 80) if self.switches[i] else (180, 30, 30)
+            pygame.draw.circle(screen, color, (cx, cy), 42)
+            pygame.draw.circle(screen, WHITE, (cx, cy), 42, 3)
+            lbl = FONT_MEDIUM.render(str(i + 1), True, BLACK if self.switches[i] else WHITE)
+            screen.blit(lbl, lbl.get_rect(center=(cx, cy)))
+            st = FONT_TINY.render("ON" if self.switches[i] else "OFF", True, WHITE)
+            screen.blit(st, st.get_rect(center=(cx, cy + 58)))
+
+        # Press counter
+        ct = FONT_SMALL.render(
+            f"Tahy: {self.press_count}/{self.max_presses}", True,
+            RED if self.press_count >= self.max_presses - 2 else WHITE)
+        screen.blit(ct, (SCREEN_WIDTH // 2 - ct.get_width() // 2, SCREEN_HEIGHT - 120))
+
+        # Link legend
+        legend = FONT_TINY.render(
+            "Kazdy prepinac meni i propojene sousedy (cary)!", True, LIGHT_GRAY)
+        screen.blit(legend, (SCREEN_WIDTH // 2 - legend.get_width() // 2, SCREEN_HEIGHT - 50))
+
+        # Flash
+        if self.flash_timer > 0 and self.flash_msg:
+            ft = FONT_MEDIUM.render(self.flash_msg, True, RED)
+            screen.blit(ft, (SCREEN_WIDTH // 2 - ft.get_width() // 2, SCREEN_HEIGHT // 2 + 140))
+
+        # Overlays
+        if self.won:
+            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 150))
+            screen.blit(ov, (0, 0))
+            t = FONT_LARGE.render("VSECHNY ROZSVICENY!", True, GREEN)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+        if self.lost:
+            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 150))
+            screen.blit(ov, (0, 0))
+            t = FONT_LARGE.render("PRILIS MNOHO TAHU!", True, RED)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+
+    def get_hint(self):
+        return "Kazdy prepinac meni i propojene. Zkus stisknout 2, 5, 1, 7."
+
+
+# =====================================================================
+#  LEVEL 16 — CIPHER BREAKER  (Caesar cipher puzzle)
+# =====================================================================
+class CipherBreaker(BaseGame):
+    """Cipher Breaker – decrypt a Caesar-shifted word using given shift table."""
+
+    SHIFT_TABLE = {
+        "A": "D", "B": "E", "C": "F", "D": "G", "E": "H",
+        "F": "I", "G": "J", "H": "K", "I": "L", "J": "M",
+        "K": "N", "L": "O", "M": "P", "N": "Q", "O": "R",
+        "P": "S", "Q": "T", "R": "U", "S": "V", "T": "W",
+        "U": "X", "V": "Y", "W": "Z", "X": "A", "Y": "B",
+        "Z": "C",
+    }
+    # Reverse table for decryption
+    REVERSE = {}
+
+    WORDS = [
+        "PUZZLE", "MIRROR", "CIPHER", "QUANTUM", "SWITCH",
+        "BRAIN", "LOGIC", "PORTAL", "ENIGMA", "NEBULA",
+    ]
+
+    def __init__(self):
+        super().__init__()
+        # Build reverse lookup
+        for k, v in self.SHIFT_TABLE.items():
+            self.REVERSE[v] = k
+
+        self.plain = random.choice(self.WORDS)
+        self.encrypted = "".join(self.SHIFT_TABLE.get(c, c) for c in self.plain)
+        self.answer = ""
+        self.wrong_attempts = 0
+        self.max_attempts = 4
+        self.feedback = ""
+        self.feedback_timer = 0
+        self.show_table = True
+
+    def handle_event(self, event):
+        if event.type != pygame.KEYDOWN or self.won or self.lost:
+            return
+        if event.key == pygame.K_TAB:
+            self.show_table = not self.show_table
+            return
+        if event.key == pygame.K_BACKSPACE:
+            self.answer = self.answer[:-1]
+            return
+        if event.key == pygame.K_RETURN:
+            if self.answer.upper() == self.plain:
+                self.won = True
+            else:
+                self.wrong_attempts += 1
+                self.feedback = f"SPATNE! ({self.max_attempts - self.wrong_attempts} zbyvaji)"
+                self.feedback_timer = 90
+                self.answer = ""
+                if self.wrong_attempts >= self.max_attempts:
+                    self.lost = True
+            return
+        if event.unicode.isalpha() and len(self.answer) < len(self.plain) + 2:
+            self.answer += event.unicode.upper()
+
+    def update(self):
+        if self.feedback_timer > 0:
+            self.feedback_timer -= 1
+
+    def draw(self, screen):
+        screen.fill((15, 10, 30))
+
+        title = FONT_LARGE.render("CIPHER BREAKER", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 20))
+
+        inst = FONT_SMALL.render("Desifruj slovo pomoci tabulky (posun +3). Napís a stiskni ENTER.", True, WHITE)
+        screen.blit(inst, (SCREEN_WIDTH // 2 - inst.get_width() // 2, 85))
+
+        # Encrypted word
+        enc_label = FONT_SMALL.render("Zasifrovane:", True, YELLOW)
+        screen.blit(enc_label, (SCREEN_WIDTH // 2 - 350, 150))
+        enc_text = FONT_LARGE.render(self.encrypted, True, (255, 100, 100))
+        screen.blit(enc_text, (SCREEN_WIDTH // 2 - 100, 140))
+
+        # Answer field
+        ans_label = FONT_SMALL.render("Tvoje odpoved:", True, YELLOW)
+        screen.blit(ans_label, (SCREEN_WIDTH // 2 - 350, 230))
+        ans_box = pygame.Rect(SCREEN_WIDTH // 2 - 100, 225, 400, 55)
+        pygame.draw.rect(screen, (30, 30, 60), ans_box)
+        pygame.draw.rect(screen, CYAN, ans_box, 2)
+        ans_text = FONT_LARGE.render(self.answer + "_", True, GREEN)
+        screen.blit(ans_text, (ans_box.x + 10, ans_box.y + 5))
+
+        # Attempts
+        att = FONT_SMALL.render(
+            f"Pokusy: {self.wrong_attempts}/{self.max_attempts}", True,
+            RED if self.wrong_attempts >= 3 else WHITE)
+        screen.blit(att, (SCREEN_WIDTH // 2 - att.get_width() // 2, 300))
+
+        # Shift table
+        if self.show_table:
+            tbl_y = 370
+            tbl_label = FONT_SMALL.render("SIFROVACI TABULKA (posun +3):", True, YELLOW)
+            screen.blit(tbl_label, (SCREEN_WIDTH // 2 - tbl_label.get_width() // 2, tbl_y - 30))
+            letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            row1 = "  ".join(letters)
+            row2 = "  ".join(self.SHIFT_TABLE[c] for c in letters)
+            r1 = FONT_TINY.render("PLAIN:    " + row1, True, (180, 180, 220))
+            r2 = FONT_TINY.render("CIPHER:  " + row2, True, (255, 140, 140))
+            screen.blit(r1, (SCREEN_WIDTH // 2 - r1.get_width() // 2, tbl_y))
+            screen.blit(r2, (SCREEN_WIDTH // 2 - r2.get_width() // 2, tbl_y + 28))
+            tip = FONT_TINY.render("Kazde pismeno v CIPHER odpovida pismenu v PLAIN (napr. D->A, H->E)", True, LIGHT_GRAY)
+            screen.blit(tip, (SCREEN_WIDTH // 2 - tip.get_width() // 2, tbl_y + 62))
+
+        tab_hint = FONT_TINY.render("TAB = zobrazit/skrýt tabulku", True, (100, 100, 130))
+        screen.blit(tab_hint, (SCREEN_WIDTH // 2 - tab_hint.get_width() // 2, SCREEN_HEIGHT - 40))
+
+        # Feedback
+        if self.feedback_timer > 0 and self.feedback:
+            ft = FONT_MEDIUM.render(self.feedback, True, RED)
+            screen.blit(ft, (SCREEN_WIDTH // 2 - ft.get_width() // 2, SCREEN_HEIGHT // 2 + 100))
+
+        # Overlays
+        if self.won:
+            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 150))
+            screen.blit(ov, (0, 0))
+            t = FONT_LARGE.render(f"SPRAVNE! Slovo: {self.plain}", True, GREEN)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+        if self.lost:
+            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 150))
+            screen.blit(ov, (0, 0))
+            t = FONT_LARGE.render(f"KONEC! Slovo bylo: {self.plain}", True, RED)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+
+    def get_hint(self):
+        return f"Posun je +3. Prvni pismeno desifrovane: {self.plain[0]}"
+
+
+# =====================================================================
+#  LEVEL 20 — ROLLING BALLS
+# =====================================================================
+class RollingBalls(BaseGame):
+    """Rolling Balls – tilt the board with arrow keys to roll a ball to the goal.
+    Walls block movement, holes kill, switches open gates."""
+
+    COLS = 10
+    ROWS = 8
+    CELL = 64
+
+    def __init__(self):
+        super().__init__()
+
+        # 0=empty, 1=wall, 2=hole, 3=switch(off), 4=gate(closed), 5=gate(open), 6=switch(on)
+        self.grid = [
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+            [1, 0, 1, 0, 0, 0, 1, 2, 0, 1],
+            [1, 0, 0, 0, 1, 3, 0, 0, 0, 1],
+            [1, 1, 0, 1, 1, 1, 4, 0, 1, 1],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [1, 0, 2, 0, 1, 0, 1, 0, 0, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        ]
+        # Switch at (5,3) opens gate at (6,4)
+        self.switch_gate = {(5, 3): (6, 4)}
+
+        self.ball_x = 1
+        self.ball_y = 1
+        self.goal_x = 8
+        self.goal_y = 5
+        self.moves = 0
+        self.max_moves = 40
+
+    def _slide(self, dx, dy):
+        """Slide ball in direction until it hits a wall or other obstacle."""
+        if self.won or self.lost:
+            return
+        moved = False
+        while True:
+            nx = self.ball_x + dx
+            ny = self.ball_y + dy
+            if nx < 0 or nx >= self.COLS or ny < 0 or ny >= self.ROWS:
+                break
+            cell = self.grid[ny][nx]
+            if cell == 1:  # wall
+                break
+            if cell == 4:  # closed gate
+                break
+            self.ball_x = nx
+            self.ball_y = ny
+            moved = True
+            if cell == 2:  # hole
+                self.lost = True
+                return
+            if cell in (3, 6):  # switch
+                # Toggle switch and gate
+                if (nx, ny) in self.switch_gate:
+                    gx, gy = self.switch_gate[(nx, ny)]
+                    if self.grid[gy][gx] == 4:
+                        self.grid[gy][gx] = 5  # open
+                        self.grid[ny][nx] = 6   # switch on
+                    else:
+                        self.grid[gy][gx] = 4  # close
+                        self.grid[ny][nx] = 3   # switch off
+            if self.ball_x == self.goal_x and self.ball_y == self.goal_y:
+                self.won = True
+                return
+            # Ball keeps sliding on empty / open gate
+            if cell == 0 or cell == 5 or cell == 6 or cell == 3:
+                continue
+            break
+        if moved:
+            self.moves += 1
+            if self.moves >= self.max_moves:
+                self.lost = True
+
+    def handle_event(self, event):
+        if event.type != pygame.KEYDOWN or self.won or self.lost:
+            return
+        if event.key in (pygame.K_LEFT, pygame.K_a):
+            self._slide(-1, 0)
+        elif event.key in (pygame.K_RIGHT, pygame.K_d):
+            self._slide(1, 0)
+        elif event.key in (pygame.K_UP, pygame.K_w):
+            self._slide(0, -1)
+        elif event.key in (pygame.K_DOWN, pygame.K_s):
+            self._slide(0, 1)
+
+    def draw(self, screen):
+        screen.fill((10, 15, 30))
+
+        title = FONT_LARGE.render("ROLLING BALLS", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 15))
+
+        ox = (SCREEN_WIDTH - self.COLS * self.CELL) // 2
+        oy = (SCREEN_HEIGHT - self.ROWS * self.CELL) // 2
+
+        colors = {
+            0: (30, 30, 55),     # empty
+            1: (80, 80, 100),    # wall
+            2: (20, 20, 20),     # hole
+            3: (200, 200, 0),    # switch off
+            4: (140, 50, 50),    # gate closed
+            5: (50, 140, 50),    # gate open
+            6: (100, 255, 100),  # switch on
+        }
+
+        for gy in range(self.ROWS):
+            for gx in range(self.COLS):
+                rx = ox + gx * self.CELL
+                ry = oy + gy * self.CELL
+                cell = self.grid[gy][gx]
+                rect = pygame.Rect(rx, ry, self.CELL, self.CELL)
+                pygame.draw.rect(screen, colors.get(cell, (30, 30, 55)), rect)
+                pygame.draw.rect(screen, (50, 50, 70), rect, 1)
+
+                if cell == 2:
+                    pygame.draw.circle(screen, (40, 0, 0), (rx + self.CELL // 2, ry + self.CELL // 2), 18)
+                elif cell in (3, 6):
+                    lbl = FONT_TINY.render("SW", True, BLACK)
+                    screen.blit(lbl, lbl.get_rect(center=(rx + self.CELL // 2, ry + self.CELL // 2)))
+                elif cell == 4:
+                    lbl = FONT_TINY.render("GATE", True, WHITE)
+                    screen.blit(lbl, lbl.get_rect(center=(rx + self.CELL // 2, ry + self.CELL // 2)))
+                elif cell == 5:
+                    lbl = FONT_TINY.render("OPEN", True, BLACK)
+                    screen.blit(lbl, lbl.get_rect(center=(rx + self.CELL // 2, ry + self.CELL // 2)))
+
+        # Goal
+        gx_px = ox + self.goal_x * self.CELL + self.CELL // 2
+        gy_px = oy + self.goal_y * self.CELL + self.CELL // 2
+        pygame.draw.circle(screen, (255, 215, 0), (gx_px, gy_px), 18)
+        gl = FONT_TINY.render("CIL", True, BLACK)
+        screen.blit(gl, gl.get_rect(center=(gx_px, gy_px)))
+
+        # Ball
+        bx = ox + self.ball_x * self.CELL + self.CELL // 2
+        by = oy + self.ball_y * self.CELL + self.CELL // 2
+        pygame.draw.circle(screen, (0, 180, 255), (bx, by), 20)
+        pygame.draw.circle(screen, WHITE, (bx, by), 20, 2)
+
+        # Move counter
+        mc = FONT_SMALL.render(
+            f"Tahy: {self.moves}/{self.max_moves}", True,
+            RED if self.moves >= self.max_moves - 3 else WHITE)
+        screen.blit(mc, (SCREEN_WIDTH // 2 - mc.get_width() // 2, SCREEN_HEIGHT - 90))
+
+        instr = FONT_TINY.render(
+            "SIPKY/WASD = naklon desky (micek se klouze az k prekazce)  |  "
+            "Vyhni se diram!", True, LIGHT_GRAY)
+        screen.blit(instr, (SCREEN_WIDTH // 2 - instr.get_width() // 2, SCREEN_HEIGHT - 45))
+
+        # Overlays
+        if self.won:
+            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 150))
+            screen.blit(ov, (0, 0))
+            t = FONT_LARGE.render("MICEK V CILI!", True, GREEN)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+        if self.lost:
+            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 150))
+            screen.blit(ov, (0, 0))
+            msg = "SPADL DO DIRY!" if self.grid[self.ball_y][self.ball_x] == 2 else "PRILIS MNOHO TAHU!"
+            t = FONT_LARGE.render(msg, True, RED)
+            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+
+    def get_hint(self):
+        return "Micek se klouze az narazi na zed. Aktivuj prepinac a vyhni se diram!"
 
 
 class ComingSoonGame(BaseGame):
