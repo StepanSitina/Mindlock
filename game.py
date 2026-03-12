@@ -99,10 +99,10 @@ class Game:
         self.version = GAME_VERSION
         
         self.menu_buttons = {
-            "play": Button(self.screen_width//2 - 100, 250, 200, 60, "PLAY"),
-            "patch": Button(self.screen_width//2 - 100, 350, 200, 60, "PATCH NOTES"),
-            "settings": Button(self.screen_width//2 - 100, 450, 200, 60, "SETTINGS"),
-            "exit": Button(self.screen_width//2 - 100, 550, 200, 60, "EXIT")
+            "play": Button(self.screen_width//2 - 140, 250, 280, 60, "PLAY"),
+            "patch": Button(self.screen_width//2 - 140, 350, 280, 60, "PATCH NOTES"),
+            "settings": Button(self.screen_width//2 - 140, 450, 280, 60, "SETTINGS"),
+            "exit": Button(self.screen_width//2 - 140, 550, 280, 60, "EXIT")
         }
         
         self.patch_notes = [
@@ -137,49 +137,21 @@ class Game:
         ]
         
         # =====================================
-        # GRAPHICS MENU EXPANSION - Settings Structure
+        # SETTINGS STATE
         # =====================================
         self.graphics_settings = {
-            "resolution": "1920x1080",  # Current resolution
+            "resolution": f"{self.screen_width}x{self.screen_height}",
             "fullscreen": False,
             "vsync": True,
-            "ui_scale": 100,  # Percentage: 100, 125, 150
-            "particles": True,
-            "screen_shake": True
+            "ui_scale": 100,
         }
-        
-        # Available resolutions for cycling
         self.available_resolutions = [
-            "1280x720",
-            "1600x900",
-            "1920x1080"
+            "800x600", "1024x768", "1280x720", "1366x768", "1600x900", "1920x1080"
         ]
-        
-        # Available UI scale options
-        self.available_ui_scales = [100, 125, 150]
-        
-        self.settings_buttons = {
-            "graphics": Button(200, 250, 300, 60, "Graphics", FONT_SMALL),
-            "fps_down": Button(450, 310, 50, 50, "-", FONT_SMALL),
-            "fps_up": Button(650, 310, 50, 50, "+", FONT_SMALL),
-            "resolution_down": Button(450, 360, 50, 50, "<", FONT_SMALL),
-            "resolution_up": Button(650, 360, 50, 50, ">", FONT_SMALL),
-            "fullscreen_toggle": Button(250, 420, 300, 50, "Fullscreen: OFF", FONT_SMALL),
-            "vsync_toggle": Button(250, 480, 300, 50, "VSync: ON", FONT_SMALL),
-            "ui_scale_down": Button(450, 540, 50, 50, "-", FONT_SMALL),
-            "ui_scale_up": Button(650, 540, 50, 50, "+", FONT_SMALL),
-            "particles_toggle": Button(250, 600, 300, 50, "Particles: ON", FONT_SMALL),
-            "screen_shake_toggle": Button(250, 660, 300, 50, "Screen Shake: ON", FONT_SMALL),
-            "save": Button(self.screen_width//2 - 75, 720, 150, 50, "SAVE", FONT_SMALL),
-            "developer": Button(200, 350, 300, 60, "Developer", FONT_SMALL),
-            "back": Button(self.screen_width//2 - 100, 700, 200, 60, "BACK")
-        }
-        
-
-        self.settings_expanded = {
-            "graphics": False,
-            "developer": False
-        }
+        self.available_ui_scales = [75, 100, 125, 150]
+        self.settings_tab = "graphics"  # "graphics" or "developer"
+        # Settings buttons are built dynamically in draw_settings / _build_settings_rects
+        self._settings_rects = {}  # filled each frame by draw_settings
         
 
         self.patch_buttons = {
@@ -207,63 +179,59 @@ class Game:
         }
     
     def change_resolution(self, resolution_str):
-        """Změní rozlišení a reinicializuje všechny prvky"""
+        """Change resolution, rebuild display and all UI"""
         try:
             width, height = map(int, resolution_str.split("x"))
             self.screen_width = width
             self.screen_height = height
-            
-            # Aktualizuj display
-            self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
-            
-            # Reinicializuj všechna UI prvky s novým rozlišením
+            self.graphics_settings["resolution"] = resolution_str
+            if self.graphics_settings["fullscreen"]:
+                self.screen = pygame.display.set_mode((width, height), pygame.FULLSCREEN)
+            else:
+                self.screen = pygame.display.set_mode((width, height))
             self.initialize_ui_elements()
-            
-            print(f"✅ Rozlišení změněno na {self.screen_width}x{self.screen_height}")
             return True
         except Exception as e:
-            print(f"❌ Chyba při změně rozlišení: {e}")
+            print(f"Resolution change error: {e}")
             return False
+    
+    def _toggle_fullscreen(self):
+        """Toggle real fullscreen / windowed mode"""
+        self.graphics_settings["fullscreen"] = not self.graphics_settings["fullscreen"]
+        if self.graphics_settings["fullscreen"]:
+            self.screen = pygame.display.set_mode(
+                (self.screen_width, self.screen_height), pygame.FULLSCREEN)
+        else:
+            self.screen = pygame.display.set_mode(
+                (self.screen_width, self.screen_height))
     
     def initialize_ui_elements(self):
         """Reinitialize all UI elements for current resolution"""
+        sw, sh = self.screen_width, self.screen_height
+        s = min(sw / 1920, sh / 1080)  # global scale factor
+        bw, bh = int(280 * s), int(60 * s)
         self.menu_buttons = {
-            "play": Button(self.screen_width//2 - 100, 250, 200, 60, "PLAY"),
-            "patch": Button(self.screen_width//2 - 100, 350, 200, 60, "PATCH NOTES"),
-            "settings": Button(self.screen_width//2 - 100, 450, 200, 60, "SETTINGS"),
-            "exit": Button(self.screen_width//2 - 100, 550, 200, 60, "EXIT")
-        }
-        self.settings_buttons = {
-            "graphics": Button(200, 250, 300, 60, "Graphics", FONT_SMALL),
-            "fps_down": Button(450, 310, 50, 50, "-", FONT_SMALL),
-            "fps_up": Button(650, 310, 50, 50, "+", FONT_SMALL),
-            "resolution_down": Button(450, 360, 50, 50, "<", FONT_SMALL),
-            "resolution_up": Button(650, 360, 50, 50, ">", FONT_SMALL),
-            "fullscreen_toggle": Button(250, 420, 300, 50, "Fullscreen: OFF", FONT_SMALL),
-            "vsync_toggle": Button(250, 480, 300, 50, "VSync: ON", FONT_SMALL),
-            "ui_scale_down": Button(450, 540, 50, 50, "-", FONT_SMALL),
-            "ui_scale_up": Button(650, 540, 50, 50, "+", FONT_SMALL),
-            "particles_toggle": Button(250, 600, 300, 50, "Particles: ON", FONT_SMALL),
-            "screen_shake_toggle": Button(250, 660, 300, 50, "Screen Shake: ON", FONT_SMALL),
-            "save": Button(self.screen_width//2 - 75, 720, 150, 50, "SAVE", FONT_SMALL),
-            "developer": Button(200, 350, 300, 60, "Developer", FONT_SMALL),
-            "back": Button(self.screen_width//2 - 100, 700, 200, 60, "BACK")
+            "play":     Button(sw//2 - bw//2, int(250*s), bw, bh, "PLAY"),
+            "patch":    Button(sw//2 - bw//2, int(350*s), bw, bh, "PATCH NOTES"),
+            "settings": Button(sw//2 - bw//2, int(450*s), bw, bh, "SETTINGS"),
+            "exit":     Button(sw//2 - bw//2, int(550*s), bw, bh, "EXIT")
         }
         self.patch_buttons = {
-            "back": Button(self.screen_width//2 - 100, 700, 200, 60, "ZPĚT")
+            "back": Button(sw//2 - int(100*s), sh - int(100*s), int(200*s), int(60*s), "ZPĚT")
         }
         self.play_buttons = {
-            "back": Button(self.screen_width//2 - 100, 700, 200, 60, "ZPĚT")
+            "back": Button(sw//2 - int(100*s), sh - int(100*s), int(200*s), int(60*s), "ZPĚT")
         }
+        pb = int(150*s)
         self.popup_buttons = {
-            "menu": Button(self.screen_width//2 - 250, 400, 150, 60, "MENU"),
-            "restart": Button(self.screen_width//2 - 50, 400, 150, 60, "RESTART"),
-            "next": Button(self.screen_width//2 + 150, 400, 150, 60, "DALŠÍ")
+            "menu":    Button(sw//2 - int(250*s), int(400*s), pb, int(60*s), "MENU"),
+            "restart": Button(sw//2 - pb//2,      int(400*s), pb, int(60*s), "RESTART"),
+            "next":    Button(sw//2 + int(100*s),  int(400*s), pb, int(60*s), "DALŠÍ")
         }
         self.pause_buttons = {
-            "continue": Button(self.screen_width//2 - 100, 350, 200, 60, "CONTINUE"),
-            "restart": Button(self.screen_width//2 - 100, 450, 200, 60, "RESTART"),
-            "exit": Button(self.screen_width//2 - 100, 550, 200, 60, "EXIT")
+            "continue": Button(sw//2 - int(100*s), int(350*s), int(200*s), int(60*s), "CONTINUE"),
+            "restart":  Button(sw//2 - int(100*s), int(450*s), int(200*s), int(60*s), "RESTART"),
+            "exit":     Button(sw//2 - int(100*s), int(550*s), int(200*s), int(60*s), "EXIT")
         }
         self.create_level_buttons()
         
@@ -275,6 +243,16 @@ class Game:
             x = 150 + col * 180
             y = 150 + row * 120
             self.level_buttons[i] = Button(x, y, 160, 100, f"LEVEL {i}", FONT_SMALL)
+    
+    def apply_ui_scale(self):
+        """Apply UI scale to fonts and reinitialize all UI elements"""
+        global FONT_LARGE, FONT_MEDIUM, FONT_SMALL, FONT_TINY
+        scale = self.graphics_settings["ui_scale"] / 100.0
+        FONT_LARGE = pygame.font.Font(None, int(80 * scale))
+        FONT_MEDIUM = pygame.font.Font(None, int(50 * scale))
+        FONT_SMALL = pygame.font.Font(None, int(32 * scale))
+        FONT_TINY = pygame.font.Font(None, int(24 * scale))
+        self.initialize_ui_elements()
     
     def draw_menu(self):
         """Kreslí hlavní menu"""
@@ -337,126 +315,123 @@ class Game:
         self.patch_buttons["back"].draw(self.screen)
     
     def draw_settings(self):
-        """
-        Kreslí nastavení s rozšířeným Graphics menu.
-        
-        FPS ALIGNMENT FIX:
-        - Dynamicky centruje FPS hodnotu mezi minus a plus tlačítky
-        - Bez hardcoded pixelů
-        
-        GRAPHICS MENU EXPANSION:
-        - Resolution selector
-        - Fullscreen toggle
-        - VSync toggle
-        - UI Scale option
-        - Effects toggles
-        """
-        self.screen.fill(DARK_BLUE)
-        
-        title = FONT_LARGE.render("SETTINGS", True, CYAN)
-        title_rect = title.get_rect(center=(self.screen_width//2, 40))
-        self.screen.blit(title, title_rect)
-        
-        # =====================================
-        # GRAPHICS SECTION
-        # =====================================
-        graphics_button = self.settings_buttons["graphics"]
-        graphics_button.draw(self.screen)
-        
-        if self.settings_expanded["graphics"]:
-            # FPS Setting
-            fps_label = FONT_SMALL.render("FPS:", True, WHITE)
-            self.screen.blit(fps_label, (250, 320))
-            
-            # FPS ALIGNMENT FIX: Dynamic centering between minus and plus buttons
-            fps_down_rect = self.settings_buttons["fps_down"].rect
-            fps_up_rect = self.settings_buttons["fps_up"].rect
-            fps_center_x = (fps_down_rect.right + fps_up_rect.left) // 2
-            fps_center_y = fps_down_rect.centery
-            
-            fps_value = FONT_MEDIUM.render(str(self.fps), True, YELLOW)
-            fps_rect = fps_value.get_rect(center=(fps_center_x, fps_center_y))
-            self.screen.blit(fps_value, fps_rect)
-            
-            self.settings_buttons["fps_down"].draw(self.screen)
-            self.settings_buttons["fps_up"].draw(self.screen)
-            
-            # =====================================
-            # RESOLUTION SELECTOR
-            # =====================================
-            res_label = FONT_SMALL.render("Resolution:", True, WHITE)
-            self.screen.blit(res_label, (250, 370))
-            
-            res_center_x = (self.settings_buttons["resolution_down"].rect.right + 
-                           self.settings_buttons["resolution_up"].rect.left) // 2
-            res_text = FONT_TINY.render(self.graphics_settings["resolution"], True, YELLOW)
-            res_rect = res_text.get_rect(center=(res_center_x, 375))
-            self.screen.blit(res_text, res_rect)
-            
-            self.settings_buttons["resolution_down"].draw(self.screen)
-            self.settings_buttons["resolution_up"].draw(self.screen)
-            
-            # =====================================
-            # FULLSCREEN TOGGLE
-            # =====================================
-            fullscreen_state = "ON" if self.graphics_settings["fullscreen"] else "OFF"
-            self.settings_buttons["fullscreen_toggle"].text = f"Fullscreen: {fullscreen_state}"
-            self.settings_buttons["fullscreen_toggle"].draw(self.screen)
-            
-            # =====================================
-            # VSYNC TOGGLE
-            # =====================================
-            vsync_state = "ON" if self.graphics_settings["vsync"] else "OFF"
-            self.settings_buttons["vsync_toggle"].text = f"VSync: {vsync_state}"
-            self.settings_buttons["vsync_toggle"].draw(self.screen)
-            
-            # =====================================
-            # UI SCALE OPTION
-            # =====================================
-            ui_scale_label = FONT_SMALL.render("UI Scale:", True, WHITE)
-            self.screen.blit(ui_scale_label, (250, 550))
-            
-            ui_scale_center_x = (self.settings_buttons["ui_scale_down"].rect.right + 
-                                self.settings_buttons["ui_scale_up"].rect.left) // 2
-            ui_scale_text = FONT_SMALL.render(f"{self.graphics_settings['ui_scale']}%", True, YELLOW)
-            ui_scale_rect = ui_scale_text.get_rect(center=(ui_scale_center_x, 555))
-            self.screen.blit(ui_scale_text, ui_scale_rect)
-            
-            self.settings_buttons["ui_scale_down"].draw(self.screen)
-            self.settings_buttons["ui_scale_up"].draw(self.screen)
-            
-            # =====================================
-            # EFFECTS TOGGLES
-            # =====================================
-            particles_state = "ON" if self.graphics_settings["particles"] else "OFF"
-            self.settings_buttons["particles_toggle"].text = f"Particles: {particles_state}"
-            self.settings_buttons["particles_toggle"].draw(self.screen)
-            
-            screen_shake_state = "ON" if self.graphics_settings["screen_shake"] else "OFF"
-            self.settings_buttons["screen_shake_toggle"].text = f"Screen Shake: {screen_shake_state}"
-            self.settings_buttons["screen_shake_toggle"].draw(self.screen)
-        
-        # =====================================
-        # DEVELOPER SECTION
-        # =====================================
-        developer_button = self.settings_buttons["developer"]
-        developer_button.draw(self.screen)
-        
-        if self.settings_expanded["developer"]:
-            developer_info = [
-                "Name: Stepan Sitina",
-                "Version: " + self.version,
-                "Levels: 19",
-                "Game modes: 19"
+        """Resolution-adaptive settings screen with tabs."""
+        sw, sh = self.screen_width, self.screen_height
+        s = min(sw / 1920, sh / 1080)
+        self.screen.fill((0, 0, 51))  # dark navy
+        rects = {}  # collect clickable rects this frame
+
+        # Scaled fonts
+        f_title = pygame.font.Font(None, max(20, int(72 * s)))
+        f_btn   = pygame.font.Font(None, max(14, int(36 * s)))
+        f_val   = pygame.font.Font(None, max(14, int(40 * s)))
+        f_small = pygame.font.Font(None, max(12, int(28 * s)))
+
+        # --- Title ---
+        title_surf = f_title.render("SETTINGS", True, CYAN)
+        self.screen.blit(title_surf, title_surf.get_rect(center=(sw//2, int(50*s))))
+
+        # --- Tabs ---
+        tab_w, tab_h = int(200*s), int(50*s)
+        tab_gap = int(20*s)
+        tabs_total = tab_w * 2 + tab_gap
+        tx = sw//2 - tabs_total//2
+        ty = int(110*s)
+        for i, (tab_id, tab_label) in enumerate([("graphics", "Graphics"), ("developer", "Developer")]):
+            r = pygame.Rect(tx + i*(tab_w + tab_gap), ty, tab_w, tab_h)
+            active = self.settings_tab == tab_id
+            col = (0, 102, 255) if active else (40, 40, 80)
+            pygame.draw.rect(self.screen, col, r)
+            pygame.draw.rect(self.screen, (100, 180, 255) if active else (80, 80, 120), r, 2)
+            lbl = f_btn.render(tab_label, True, WHITE)
+            self.screen.blit(lbl, lbl.get_rect(center=r.center))
+            rects[f"tab_{tab_id}"] = r
+
+        # --- Content area ---
+        cy = ty + tab_h + int(40*s)  # current Y cursor
+        row_h = int(55*s)
+        btn_w = int(50*s)
+        btn_h = int(44*s)
+        toggle_w = int(300*s)
+        cx = sw // 2  # center X
+
+        def _draw_btn(rect, text, font=f_btn):
+            pygame.draw.rect(self.screen, (0, 102, 255), rect)
+            pygame.draw.rect(self.screen, (100, 180, 255), rect, 2)
+            t = font.render(text, True, WHITE)
+            self.screen.blit(t, t.get_rect(center=rect.center))
+
+        if self.settings_tab == "graphics":
+            # Row: FPS
+            lbl = f_btn.render("FPS:", True, WHITE)
+            lbl_x = cx - int(180*s)
+            self.screen.blit(lbl, (lbl_x, cy + (row_h - lbl.get_height())//2))
+            minus_r = pygame.Rect(cx - int(20*s) - btn_w, cy + (row_h-btn_h)//2, btn_w, btn_h)
+            plus_r  = pygame.Rect(cx + int(20*s),         cy + (row_h-btn_h)//2, btn_w, btn_h)
+            _draw_btn(minus_r, "-")
+            _draw_btn(plus_r, "+")
+            val = f_val.render(str(self.fps), True, YELLOW)
+            self.screen.blit(val, val.get_rect(center=(cx, cy + row_h//2)))
+            rects["fps_down"] = minus_r
+            rects["fps_up"] = plus_r
+            cy += row_h
+
+            # Row: Resolution
+            lbl = f_btn.render("Resolution:", True, WHITE)
+            self.screen.blit(lbl, (lbl_x, cy + (row_h - lbl.get_height())//2))
+            res_val = f_val.render(self.graphics_settings["resolution"], True, YELLOW)
+            self.screen.blit(res_val, res_val.get_rect(center=(cx, cy + row_h//2)))
+            arr_r = pygame.Rect(cx + int(90*s), cy + (row_h-btn_h)//2, btn_w, btn_h)
+            _draw_btn(arr_r, ">")
+            rects["resolution_next"] = arr_r
+            cy += row_h
+
+            # Row: Fullscreen
+            fs_text = "Fullscreen: ON" if self.graphics_settings["fullscreen"] else "Fullscreen: OFF"
+            fs_r = pygame.Rect(cx - toggle_w//2, cy + (row_h-btn_h)//2, toggle_w, btn_h)
+            _draw_btn(fs_r, fs_text)
+            rects["fullscreen"] = fs_r
+            cy += row_h
+
+            # Row: VSync
+            vs_text = "VSync: ON" if self.graphics_settings["vsync"] else "VSync: OFF"
+            vs_r = pygame.Rect(cx - toggle_w//2, cy + (row_h-btn_h)//2, toggle_w, btn_h)
+            _draw_btn(vs_r, vs_text)
+            rects["vsync"] = vs_r
+            cy += row_h
+
+            # Row: UI Scale
+            lbl = f_btn.render("UI Scale:", True, WHITE)
+            self.screen.blit(lbl, (lbl_x, cy + (row_h - lbl.get_height())//2))
+            minus_r2 = pygame.Rect(cx - int(20*s) - btn_w, cy + (row_h-btn_h)//2, btn_w, btn_h)
+            plus_r2  = pygame.Rect(cx + int(20*s),         cy + (row_h-btn_h)//2, btn_w, btn_h)
+            _draw_btn(minus_r2, "-")
+            _draw_btn(plus_r2, "+")
+            val2 = f_val.render(f"{self.graphics_settings['ui_scale']}%", True, YELLOW)
+            self.screen.blit(val2, val2.get_rect(center=(cx, cy + row_h//2)))
+            rects["scale_down"] = minus_r2
+            rects["scale_up"] = plus_r2
+            cy += row_h
+
+        else:  # developer tab
+            info_lines = [
+                f"Developer: Stepan Sitina",
+                f"Version: {self.version}",
+                f"Levels: 20",
+                f"Game modes: 20",
             ]
-            
-            y_offset = 410
-            for info in developer_info:
-                info_text = FONT_SMALL.render("- " + info, True, WHITE)
-                self.screen.blit(info_text, (250, y_offset))
-                y_offset += 35
-        
-        self.settings_buttons["back"].draw(self.screen)
+            for line in info_lines:
+                t = f_btn.render(line, True, WHITE)
+                self.screen.blit(t, t.get_rect(center=(cx, cy + row_h//2)))
+                cy += row_h
+
+        # --- BACK button (bottom center) ---
+        back_w, back_h = int(220*s), int(60*s)
+        back_r = pygame.Rect(cx - back_w//2, sh - int(90*s), back_w, back_h)
+        _draw_btn(back_r, "BACK")
+        rects["back"] = back_r
+
+        self._settings_rects = rects
     
     def draw_play_menu(self):
         """Kreslí menu pro výběr levelů"""
@@ -510,7 +485,7 @@ class Game:
         self.popup_buttons["menu"].draw(self.screen)
         self.popup_buttons["restart"].draw(self.screen)
         
-        if self.game_won and self.current_level < 19:
+        if self.game_won and self.current_level < 20:
             self.popup_buttons["next"].draw(self.screen)
     
     def draw_pause_menu(self):
@@ -589,84 +564,39 @@ class Game:
             self.state = GameState.MENU
     
     def handle_settings_click(self, pos):
-        """
-        Zpracuje klik v nastavení.
-        
-        Includes:
-        - FPS adjustment
-        - Graphics menu expansion (GRAPHICS MENU EXPANSION)
-        - Resolution cycling
-        - Fullscreen, VSync, UI Scale, Effects toggles
-        """
-        if self.settings_buttons["graphics"].is_clicked(pos):
-            self.settings_expanded["graphics"] = not self.settings_expanded["graphics"]
-        elif self.settings_buttons["developer"].is_clicked(pos):
-            self.settings_expanded["developer"] = not self.settings_expanded["developer"]
-        
-        # Handle Graphics menu clicks (only if expanded)
-        elif self.settings_expanded["graphics"]:
-            # FPS Controls
-            if self.settings_buttons["fps_down"].is_clicked(pos):
-                self.fps = max(10, self.fps - 10)
-            elif self.settings_buttons["fps_up"].is_clicked(pos):
-                self.fps = min(240, self.fps + 10)
-            
-            # Resolution Controls - cycle through available resolutions
-            elif self.settings_buttons["resolution_down"].is_clicked(pos):
-                current_res = self.graphics_settings["resolution"]
-                current_idx = self.available_resolutions.index(current_res)
-                new_idx = (current_idx - 1) % len(self.available_resolutions)
-                self.graphics_settings["resolution"] = self.available_resolutions[new_idx]
-                # TODO: Safely update pygame display mode
-                
-            elif self.settings_buttons["resolution_up"].is_clicked(pos):
-                current_res = self.graphics_settings["resolution"]
-                current_idx = self.available_resolutions.index(current_res)
-                new_idx = (current_idx + 1) % len(self.available_resolutions)
-                new_res = self.available_resolutions[new_idx]
-                self.graphics_settings["resolution"] = new_res
-                self.change_resolution(new_res)
-            
-            # Fullscreen Toggle
-            elif self.settings_buttons["fullscreen_toggle"].is_clicked(pos):
-                self.graphics_settings["fullscreen"] = not self.graphics_settings["fullscreen"]
-                # TODO: Update display mode with FULLSCREEN flag if needed
-            
-            # VSync Toggle
-            elif self.settings_buttons["vsync_toggle"].is_clicked(pos):
-                self.graphics_settings["vsync"] = not self.graphics_settings["vsync"]
-                # TODO: Update pygame display flags if needed
-            
-            # UI Scale Controls
-            elif self.settings_buttons["ui_scale_down"].is_clicked(pos):
-                current_scale = self.graphics_settings["ui_scale"]
-                current_idx = self.available_ui_scales.index(current_scale)
-                new_idx = (current_idx - 1) % len(self.available_ui_scales)
-                self.graphics_settings["ui_scale"] = self.available_ui_scales[new_idx]
-                # UI scale by itself doesn't require full reinit
-            
-            elif self.settings_buttons["ui_scale_up"].is_clicked(pos):
-                current_scale = self.graphics_settings["ui_scale"]
-                current_idx = self.available_ui_scales.index(current_scale)
-                new_idx = (current_idx + 1) % len(self.available_ui_scales)
-                self.graphics_settings["ui_scale"] = self.available_ui_scales[new_idx]
-                # UI scale by itself doesn't require full reinit
-            
-            # Effects Toggles
-            elif self.settings_buttons["particles_toggle"].is_clicked(pos):
-                self.graphics_settings["particles"] = not self.graphics_settings["particles"]
-            
-            elif self.settings_buttons["screen_shake_toggle"].is_clicked(pos):
-                self.graphics_settings["screen_shake"] = not self.graphics_settings["screen_shake"]
-            
-            # SAVE button - Aplikuj změny rozlišení
-            elif self.settings_buttons["save"].is_clicked(pos):
-                # Změň rozlišení pokud se změnilo
-                new_res = self.graphics_settings["resolution"]
-                print(f"✅ [SETTINGS SAVED] Rozlišení: {new_res}")
-        
-        # Back button (always available)
-        if self.settings_buttons["back"].is_clicked(pos):
+        """Handle clicks on the dynamically-built settings UI."""
+        R = self._settings_rects
+        # Tabs
+        if R.get("tab_graphics") and R["tab_graphics"].collidepoint(pos):
+            self.settings_tab = "graphics"
+        elif R.get("tab_developer") and R["tab_developer"].collidepoint(pos):
+            self.settings_tab = "developer"
+        # Graphics controls
+        elif R.get("fps_down") and R["fps_down"].collidepoint(pos):
+            self.fps = max(10, self.fps - 10)
+        elif R.get("fps_up") and R["fps_up"].collidepoint(pos):
+            self.fps = min(240, self.fps + 10)
+        elif R.get("resolution_next") and R["resolution_next"].collidepoint(pos):
+            cur = self.graphics_settings["resolution"]
+            if cur in self.available_resolutions:
+                idx = (self.available_resolutions.index(cur) + 1) % len(self.available_resolutions)
+            else:
+                idx = 0
+            self.change_resolution(self.available_resolutions[idx])
+        elif R.get("fullscreen") and R["fullscreen"].collidepoint(pos):
+            self._toggle_fullscreen()
+        elif R.get("vsync") and R["vsync"].collidepoint(pos):
+            self.graphics_settings["vsync"] = not self.graphics_settings["vsync"]
+        elif R.get("scale_down") and R["scale_down"].collidepoint(pos):
+            idx = self.available_ui_scales.index(self.graphics_settings["ui_scale"])
+            self.graphics_settings["ui_scale"] = self.available_ui_scales[(idx - 1) % len(self.available_ui_scales)]
+            self.apply_ui_scale()
+        elif R.get("scale_up") and R["scale_up"].collidepoint(pos):
+            idx = self.available_ui_scales.index(self.graphics_settings["ui_scale"])
+            self.graphics_settings["ui_scale"] = self.available_ui_scales[(idx + 1) % len(self.available_ui_scales)]
+            self.apply_ui_scale()
+        # Back
+        if R.get("back") and R["back"].collidepoint(pos):
             self.state = GameState.MENU
     
     def handle_play_click(self, pos):
@@ -708,8 +638,8 @@ class Game:
             except Exception as e:
                 print(f"Chyba při restartování levelu: {e}")
                 self.state = GameState.PLAYING
-        elif self.game_won and self.current_level < 19 and self.popup_buttons["next"].is_clicked(pos):
-            if self.current_level < 19:
+        elif self.game_won and self.current_level < 20 and self.popup_buttons["next"].is_clicked(pos):
+            if self.current_level < 20:
                 self.current_level += 1
                 try:
                     self.current_game = self.create_game_level(self.current_level)
@@ -810,8 +740,6 @@ class Game:
                     button.is_hovered(mouse_pos)
                 for button in self.patch_buttons.values():
                     button.is_hovered(mouse_pos)
-                for button in self.settings_buttons.values():
-                    button.is_hovered(mouse_pos)
                 for button in self.play_buttons.values():
                     button.is_hovered(mouse_pos)
                 for button in self.level_buttons.values():
@@ -898,7 +826,7 @@ class Game:
             if self.current_game:
                 self.current_game.draw(self.screen)
                 
-                level_text = FONT_SMALL.render(f"Level: {self.current_level}/19", True, WHITE)
+                level_text = FONT_SMALL.render(f"Level: {self.current_level}/20", True, WHITE)
                 self.screen.blit(level_text, (self.screen_width - 200, 10))
                 
                 hint_text = FONT_TINY.render("Napoveda: 2x SPACE | ESC: Menu", True, YELLOW)
@@ -2591,7 +2519,7 @@ class SpeedClick(BaseGame):
         self.clicked = 0
         self.timer = 0
         self.timer_started = False
-        self.time_limit = 300  # 5 sekund (300 framů)
+        self.time_limit = 420  # 7 sekund (420 framů)
         self.generate_targets()
     
     def generate_targets(self):
@@ -5033,39 +4961,108 @@ class CipherBreaker(BaseGame):
 #  LEVEL 20 — ROLLING BALLS
 # =====================================================================
 class RollingBalls(BaseGame):
-    """Rolling Balls – tilt the board with arrow keys to roll a ball to the goal.
-    Walls block movement, holes kill, switches open gates."""
+    """Rolling Balls – 5 sub-levels, resolution-adaptive grid puzzle.
+    Ball slides until hitting a wall. Holes kill, switches open gates."""
 
-    COLS = 10
-    ROWS = 8
-    CELL = 64
+    # 0=empty, 1=wall, 2=hole, 3=switch(off), 4=gate(closed), 5=gate(open), 6=switch(on)
+    LEVELS = [
+        {   # Level 1 – intro: no hazards, just reach the goal
+            "grid": [
+                [1,1,1,1,1,1,1,1,1,1],
+                [1,0,0,0,1,0,0,0,0,1],
+                [1,0,1,0,0,0,0,0,0,1],
+                [1,0,0,0,0,0,1,0,0,1],
+                [1,0,0,1,0,0,0,0,0,1],
+                [1,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,0,1,0,0,0,1],
+                [1,1,1,1,1,1,1,1,1,1],
+            ],
+            "switch_gate": {},
+            "ball": (1, 1), "goal": (8, 6), "max_moves": 30,
+        },
+        {   # Level 2 – walls only
+            "grid": [
+                [1,1,1,1,1,1,1,1,1,1],
+                [1,0,0,0,1,0,0,0,0,1],
+                [1,0,1,0,0,0,1,0,0,1],
+                [1,0,0,0,1,0,0,0,0,1],
+                [1,1,0,0,0,0,0,0,1,1],
+                [1,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,1,0,0,0,0,1],
+                [1,1,1,1,1,1,1,1,1,1],
+            ],
+            "switch_gate": {},
+            "ball": (1, 1), "goal": (8, 6), "max_moves": 35,
+        },
+        {   # Level 3 – switch & gate (solvable)
+            "grid": [
+                [1,1,1,1,1,1,1,1,1,1],
+                [1,0,0,0,1,0,0,0,0,1],
+                [1,0,1,0,0,0,0,0,0,1],
+                [1,0,0,0,0,3,0,1,0,1],
+                [1,0,0,1,1,1,4,0,0,1],
+                [1,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,1,0,1,0,0,1],
+                [1,1,1,1,1,1,1,1,1,1],
+            ],
+            "switch_gate": {(5, 3): (6, 4)},
+            "ball": (1, 1), "goal": (8, 5), "max_moves": 40,
+        },
+        {   # Level 4 – two switches, tight corridors
+            "grid": [
+                [1,1,1,1,1,1,1,1,1,1,1,1],
+                [1,0,0,0,1,0,0,0,0,0,0,1],
+                [1,0,1,0,0,0,1,0,0,0,0,1],
+                [1,0,0,3,1,0,0,0,0,1,0,1],
+                [1,1,0,1,1,4,0,0,1,1,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,1,3,1,0,4,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,1],
+                [1,1,1,1,1,1,1,1,1,1,1,1],
+            ],
+            "switch_gate": {(3, 3): (5, 4), (5, 6): (8, 6)},
+            "ball": (1, 1), "goal": (10, 7), "max_moves": 45,
+        },
+        {   # Level 5 – maze-like, multiple gates
+            "grid": [
+                [1,1,1,1,1,1,1,1,1,1,1,1],
+                [1,0,0,0,0,1,0,0,0,0,0,1],
+                [1,0,1,0,0,0,0,1,0,1,0,1],
+                [1,0,0,0,1,3,0,0,0,0,0,1],
+                [1,1,0,1,1,1,4,0,1,0,1,1],
+                [1,0,0,0,0,0,0,0,0,3,0,1],
+                [1,0,1,0,1,0,1,0,4,0,0,1],
+                [1,0,0,0,0,0,0,0,0,0,0,1],
+                [1,0,0,0,1,0,0,1,0,0,0,1],
+                [1,1,1,1,1,1,1,1,1,1,1,1],
+            ],
+            "switch_gate": {(5, 3): (6, 4), (9, 5): (8, 6)},
+            "ball": (1, 1), "goal": (10, 8), "max_moves": 50,
+        },
+    ]
 
     def __init__(self):
         super().__init__()
+        self.sub_level = 0
+        self._load_sub_level(0)
 
-        # 0=empty, 1=wall, 2=hole, 3=switch(off), 4=gate(closed), 5=gate(open), 6=switch(on)
-        self.grid = [
-            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-            [1, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-            [1, 0, 1, 0, 0, 0, 1, 2, 0, 1],
-            [1, 0, 0, 0, 1, 3, 0, 0, 0, 1],
-            [1, 1, 0, 1, 1, 1, 4, 0, 1, 1],
-            [1, 0, 0, 0, 0, 0, 0, 0, 0, 1],
-            [1, 0, 2, 0, 1, 0, 1, 0, 0, 1],
-            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        ]
-        # Switch at (5,3) opens gate at (6,4)
-        self.switch_gate = {(5, 3): (6, 4)}
-
-        self.ball_x = 1
-        self.ball_y = 1
-        self.goal_x = 8
-        self.goal_y = 5
+    def _load_sub_level(self, idx):
+        """Load sub-level by index, deep-copy grid so restarts work."""
+        data = self.LEVELS[idx]
+        self.sub_level = idx
+        self.ROWS = len(data["grid"])
+        self.COLS = len(data["grid"][0])
+        self.grid = [row[:] for row in data["grid"]]
+        self.switch_gate = dict(data["switch_gate"])
+        self.ball_x, self.ball_y = data["ball"]
+        self.goal_x, self.goal_y = data["goal"]
+        self.max_moves = data["max_moves"]
         self.moves = 0
-        self.max_moves = 40
+        self.won = False
+        self.lost = False
 
+    # ---------- sliding mechanics ----------
     def _slide(self, dx, dy):
-        """Slide ball in direction until it hits a wall or other obstacle."""
         if self.won or self.lost:
             return
         moved = False
@@ -5075,40 +5072,50 @@ class RollingBalls(BaseGame):
             if nx < 0 or nx >= self.COLS or ny < 0 or ny >= self.ROWS:
                 break
             cell = self.grid[ny][nx]
-            if cell == 1:  # wall
-                break
-            if cell == 4:  # closed gate
+            if cell == 1 or cell == 4:
                 break
             self.ball_x = nx
             self.ball_y = ny
             moved = True
-            if cell == 2:  # hole
+            if cell == 2:
                 self.lost = True
                 return
-            if cell in (3, 6):  # switch
-                # Toggle switch and gate
+            if cell in (3, 6):
                 if (nx, ny) in self.switch_gate:
                     gx, gy = self.switch_gate[(nx, ny)]
                     if self.grid[gy][gx] == 4:
-                        self.grid[gy][gx] = 5  # open
-                        self.grid[ny][nx] = 6   # switch on
+                        self.grid[gy][gx] = 5
+                        self.grid[ny][nx] = 6
                     else:
-                        self.grid[gy][gx] = 4  # close
-                        self.grid[ny][nx] = 3   # switch off
+                        self.grid[gy][gx] = 4
+                        self.grid[ny][nx] = 3
             if self.ball_x == self.goal_x and self.ball_y == self.goal_y:
                 self.won = True
                 return
-            # Ball keeps sliding on empty / open gate
-            if cell == 0 or cell == 5 or cell == 6 or cell == 3:
-                continue
-            break
         if moved:
             self.moves += 1
             if self.moves >= self.max_moves:
                 self.lost = True
 
+    # ---------- events ----------
     def handle_event(self, event):
-        if event.type != pygame.KEYDOWN or self.won or self.lost:
+        if event.type != pygame.KEYDOWN:
+            return
+        # R = restart current sub-level
+        if event.key == pygame.K_r:
+            self._load_sub_level(self.sub_level)
+            return
+        # After winning, ENTER = next sub-level
+        if self.won:
+            if event.key == pygame.K_RETURN:
+                if self.sub_level + 1 < len(self.LEVELS):
+                    self._load_sub_level(self.sub_level + 1)
+                else:
+                    pass  # all sub-levels beaten – MindLock popup handles it
+            return
+        if self.lost:
+            if event.key == pygame.K_RETURN:
+                self._load_sub_level(self.sub_level)
             return
         if event.key in (pygame.K_LEFT, pygame.K_a):
             self._slide(-1, 0)
@@ -5119,84 +5126,112 @@ class RollingBalls(BaseGame):
         elif event.key in (pygame.K_DOWN, pygame.K_s):
             self._slide(0, 1)
 
+    def is_won(self):
+        return self.won and self.sub_level == len(self.LEVELS) - 1
+
+    # ---------- resolution-adaptive drawing ----------
     def draw(self, screen):
+        sw, sh = screen.get_size()
+        scale = min(sw / 900, sh / 700)   # reference 900x700 design
         screen.fill((10, 15, 30))
 
-        title = FONT_LARGE.render("ROLLING BALLS", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 15))
+        # Scaled fonts
+        f_large = pygame.font.Font(None, max(16, int(64 * scale)))
+        f_med   = pygame.font.Font(None, max(14, int(40 * scale)))
+        f_small = pygame.font.Font(None, max(12, int(28 * scale)))
+        f_tiny  = pygame.font.Font(None, max(10, int(20 * scale)))
 
-        ox = (SCREEN_WIDTH - self.COLS * self.CELL) // 2
-        oy = (SCREEN_HEIGHT - self.ROWS * self.CELL) // 2
+        # Title
+        title = f_large.render("ROLLING BALLS", True, CYAN)
+        title_y = int(12 * scale)
+        screen.blit(title, (sw // 2 - title.get_width() // 2, title_y))
+
+        # Sub-level / moves info
+        info = f_small.render(
+            f"Level: {self.sub_level + 1}/{len(self.LEVELS)}   Tahy: {self.moves}/{self.max_moves}",
+            True, RED if self.moves >= self.max_moves - 3 else WHITE)
+        info_y = title_y + title.get_height() + int(6 * scale)
+        screen.blit(info, (sw // 2 - info.get_width() // 2, info_y))
+
+        # Compute cell size to fit grid centered between header and footer
+        header_h = info_y + info.get_height() + int(10 * scale)
+        footer_h = int(50 * scale)
+        avail_w = sw - int(40 * scale)
+        avail_h = sh - header_h - footer_h
+        cell = min(avail_w // self.COLS, avail_h // self.ROWS, int(60 * scale))
+        cell = max(cell, 16)
+
+        ox = (sw - self.COLS * cell) // 2
+        oy = header_h + (avail_h - self.ROWS * cell) // 2
 
         colors = {
-            0: (30, 30, 55),     # empty
-            1: (80, 80, 100),    # wall
-            2: (20, 20, 20),     # hole
-            3: (200, 200, 0),    # switch off
-            4: (140, 50, 50),    # gate closed
-            5: (50, 140, 50),    # gate open
-            6: (100, 255, 100),  # switch on
+            0: (30, 30, 55), 1: (80, 80, 100), 2: (20, 20, 20),
+            3: (200, 200, 0), 4: (140, 50, 50), 5: (50, 140, 50),
+            6: (100, 255, 100),
         }
+        r_hole = max(4, int(cell * 0.28))
+        r_goal = max(4, int(cell * 0.28))
+        r_ball = max(5, int(cell * 0.31))
 
         for gy in range(self.ROWS):
             for gx in range(self.COLS):
-                rx = ox + gx * self.CELL
-                ry = oy + gy * self.CELL
-                cell = self.grid[gy][gx]
-                rect = pygame.Rect(rx, ry, self.CELL, self.CELL)
-                pygame.draw.rect(screen, colors.get(cell, (30, 30, 55)), rect)
+                rx = ox + gx * cell
+                ry = oy + gy * cell
+                c = self.grid[gy][gx]
+                rect = pygame.Rect(rx, ry, cell, cell)
+                pygame.draw.rect(screen, colors.get(c, (30, 30, 55)), rect)
                 pygame.draw.rect(screen, (50, 50, 70), rect, 1)
-
-                if cell == 2:
-                    pygame.draw.circle(screen, (40, 0, 0), (rx + self.CELL // 2, ry + self.CELL // 2), 18)
-                elif cell in (3, 6):
-                    lbl = FONT_TINY.render("SW", True, BLACK)
-                    screen.blit(lbl, lbl.get_rect(center=(rx + self.CELL // 2, ry + self.CELL // 2)))
-                elif cell == 4:
-                    lbl = FONT_TINY.render("GATE", True, WHITE)
-                    screen.blit(lbl, lbl.get_rect(center=(rx + self.CELL // 2, ry + self.CELL // 2)))
-                elif cell == 5:
-                    lbl = FONT_TINY.render("OPEN", True, BLACK)
-                    screen.blit(lbl, lbl.get_rect(center=(rx + self.CELL // 2, ry + self.CELL // 2)))
+                cx, cy = rx + cell // 2, ry + cell // 2
+                if c == 2:
+                    pygame.draw.circle(screen, (40, 0, 0), (cx, cy), r_hole)
+                elif c in (3, 6):
+                    lbl = f_tiny.render("SW", True, BLACK)
+                    screen.blit(lbl, lbl.get_rect(center=(cx, cy)))
+                elif c == 4:
+                    lbl = f_tiny.render("GATE", True, WHITE)
+                    screen.blit(lbl, lbl.get_rect(center=(cx, cy)))
+                elif c == 5:
+                    lbl = f_tiny.render("OPEN", True, BLACK)
+                    screen.blit(lbl, lbl.get_rect(center=(cx, cy)))
 
         # Goal
-        gx_px = ox + self.goal_x * self.CELL + self.CELL // 2
-        gy_px = oy + self.goal_y * self.CELL + self.CELL // 2
-        pygame.draw.circle(screen, (255, 215, 0), (gx_px, gy_px), 18)
-        gl = FONT_TINY.render("CIL", True, BLACK)
-        screen.blit(gl, gl.get_rect(center=(gx_px, gy_px)))
+        gcx = ox + self.goal_x * cell + cell // 2
+        gcy = oy + self.goal_y * cell + cell // 2
+        pygame.draw.circle(screen, (255, 215, 0), (gcx, gcy), r_goal)
+        gl = f_tiny.render("CIL", True, BLACK)
+        screen.blit(gl, gl.get_rect(center=(gcx, gcy)))
 
         # Ball
-        bx = ox + self.ball_x * self.CELL + self.CELL // 2
-        by = oy + self.ball_y * self.CELL + self.CELL // 2
-        pygame.draw.circle(screen, (0, 180, 255), (bx, by), 20)
-        pygame.draw.circle(screen, WHITE, (bx, by), 20, 2)
+        bx = ox + self.ball_x * cell + cell // 2
+        by = oy + self.ball_y * cell + cell // 2
+        pygame.draw.circle(screen, (0, 180, 255), (bx, by), r_ball)
+        pygame.draw.circle(screen, WHITE, (bx, by), r_ball, 2)
 
-        # Move counter
-        mc = FONT_SMALL.render(
-            f"Tahy: {self.moves}/{self.max_moves}", True,
-            RED if self.moves >= self.max_moves - 3 else WHITE)
-        screen.blit(mc, (SCREEN_WIDTH // 2 - mc.get_width() // 2, SCREEN_HEIGHT - 90))
+        # Footer instructions
+        instr = f_tiny.render(
+            "SIPKY/WASD = pohyb  |  R = restart  |  Vyhni se diram!", True, LIGHT_GRAY)
+        screen.blit(instr, (sw // 2 - instr.get_width() // 2, sh - int(38 * scale)))
 
-        instr = FONT_TINY.render(
-            "SIPKY/WASD = naklon desky (micek se klouze az k prekazce)  |  "
-            "Vyhni se diram!", True, LIGHT_GRAY)
-        screen.blit(instr, (SCREEN_WIDTH // 2 - instr.get_width() // 2, SCREEN_HEIGHT - 45))
-
-        # Overlays
-        if self.won:
-            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+        # Win / Lose overlays
+        if self.won or self.lost:
+            ov = pygame.Surface((sw, sh), pygame.SRCALPHA)
             ov.fill((0, 0, 0, 150))
             screen.blit(ov, (0, 0))
-            t = FONT_LARGE.render("MICEK V CILI!", True, GREEN)
-            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
-        if self.lost:
-            ov = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-            ov.fill((0, 0, 0, 150))
-            screen.blit(ov, (0, 0))
-            msg = "SPADL DO DIRY!" if self.grid[self.ball_y][self.ball_x] == 2 else "PRILIS MNOHO TAHU!"
-            t = FONT_LARGE.render(msg, True, RED)
-            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
+            if self.won:
+                if self.sub_level + 1 < len(self.LEVELS):
+                    msg = f"LEVEL {self.sub_level + 1} HOTOVO!"
+                    sub = "ENTER = dalsi level"
+                else:
+                    msg = "MICEK V CILI!"
+                    sub = "Vsechny levely hotovy!"
+                t = f_large.render(msg, True, GREEN)
+            else:
+                reason = "SPADL DO DIRY!" if self.grid[self.ball_y][self.ball_x] == 2 else "PRILIS MNOHO TAHU!"
+                t = f_large.render(reason, True, RED)
+                sub = "ENTER = restart"
+            screen.blit(t, (sw // 2 - t.get_width() // 2, sh // 2 - int(40 * scale)))
+            s = f_small.render(sub, True, YELLOW)
+            screen.blit(s, (sw // 2 - s.get_width() // 2, sh // 2 + int(30 * scale)))
 
     def get_hint(self):
         return "Micek se klouze az narazi na zed. Aktivuj prepinac a vyhni se diram!"
