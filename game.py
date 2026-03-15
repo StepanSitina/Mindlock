@@ -2,6 +2,12 @@ import pygame
 import sys
 import random
 import math
+import os
+import re
+import json
+import hashlib
+import zipfile
+import time
 from enum import Enum
 from collections import defaultdict, deque
 
@@ -12,7 +18,7 @@ pygame.init()
 # =====================================
 # VERSION SYSTEM FIX
 # =====================================
-GAME_VERSION = "1.8.0"
+GAME_VERSION = "1.9.0"
 
 SCREEN_WIDTH = 1924
 SCREEN_HEIGHT = 1080
@@ -35,7 +41,72 @@ YELLOW = (255, 255, 0)
 CYAN = (0, 255, 255)
 DARK_BLUE = (25, 25, 112)
 
+
+class SoundFX:
+    """Simple procedural SFX generator shared across whole game."""
+    def __init__(self):
+        self.enabled = True
+        self.cache = {}
+        self.master_volume = 0.70
+        try:
+            if pygame.mixer.get_init() is None:
+                pygame.mixer.init(frequency=44100, size=-16, channels=1)
+        except Exception:
+            self.enabled = False
+
+    def set_master_volume(self, value):
+        self.master_volume = max(0.0, min(1.0, value))
+
+    def play(self, name):
+        if not self.enabled:
+            return
+        try:
+            if name not in self.cache:
+                self.cache[name] = self._create(name)
+            snd = self.cache.get(name)
+            if snd is not None:
+                snd.set_volume(self.master_volume)
+                snd.play()
+        except Exception:
+            pass
+
+    def _create(self, name):
+        presets = {
+            "level_start": (620, 80, 0.18, "square"),
+            "level_action": (280, 22, 0.04, "sine"),
+            "level_success": (980, 130, 0.20, "sine"),
+            "level_fail": (190, 160, 0.18, "sine"),
+            "level_complete": (1200, 180, 0.22, "sine"),
+            "pause_toggle": (300, 50, 0.10, "square"),
+            "menu_click": (340, 45, 0.08, "sine"),
+            "simon_flash": (720, 65, 0.10, "sine"),
+        }
+        freq, duration_ms, volume, wave = presets.get(name, presets["menu_click"])
+        sample_rate = 44100
+        sample_count = max(1, int(sample_rate * duration_ms / 1000))
+        max_amp = int(32767 * min(max(volume, 0.0), 1.0))
+
+        buf = bytearray(sample_count * 2)
+        for i in range(sample_count):
+            t = i / sample_rate
+            if wave == "square":
+                val = max_amp if math.sin(2 * math.pi * freq * t) >= 0 else -max_amp
+            else:
+                val = int(max_amp * math.sin(2 * math.pi * freq * t))
+
+            # short fade-out to prevent clicks
+            fade_len = min(int(sample_rate * 0.01), sample_count)
+            if i >= sample_count - fade_len and fade_len > 0:
+                factor = (sample_count - i) / fade_len
+                val = int(val * factor)
+
+            buf[2 * i] = val & 0xFF
+            buf[2 * i + 1] = (val >> 8) & 0xFF
+
+        return pygame.mixer.Sound(buffer=bytes(buf))
+
 class GameState(Enum):
+    LOGIN = 0
     MENU = 1
     PLAYING = 2
     PATCH_NOTES = 3
@@ -43,6 +114,8 @@ class GameState(Enum):
     GAME = 5
     LEVEL_COMPLETE = 6
     GAME_OVER = 7
+    ACHIEVEMENTS = 8
+    THEMES = 9
 
 class Button:
     def __init__(self, x, y, width, height, text, font=FONT_MEDIUM):
@@ -52,12 +125,13 @@ class Button:
         self.hovered = False
         self.color = BLUE
         self.hover_color = CYAN
+        self.text_color = BLACK
         
     def draw(self, screen):
         color = self.hover_color if self.hovered else self.color
         pygame.draw.rect(screen, color, self.rect)
         pygame.draw.rect(screen, WHITE, self.rect, 3)
-        text_surface = self.font.render(self.text, True, BLACK)
+        text_surface = self.font.render(self.text, True, self.text_color)
         text_rect = text_surface.get_rect(center=self.rect.center)
         screen.blit(text_surface, text_rect)
         
@@ -78,7 +152,7 @@ class Game:
         pygame.display.set_caption("MindLock! - Puzzle Game")
         self.clock = pygame.time.Clock()
         self.running = True
-        self.state = GameState.MENU
+        self.state = GameState.LOGIN
         self.fps = 60
         self.current_level = 1
         self.unlocked_levels = 1
@@ -91,10 +165,66 @@ class Game:
         self.show_hint_popup = False
         self.hint_popup_timer = 0
         self.completed_levels = set()
+        self.level_stars = defaultdict(int)
+        self.level_best_time = {}
+        self.level_best_reaction_ms = {}
+        self.level_best_moves = {}
+        self.level_attempt_mistakes = defaultdict(int)
+        self.player_score = 0
+        self.player_inventory = []
+        self.current_level_start_ticks = 0
+        self.current_level_elapsed_snapshot = None
         self.space_pressed = False
         self.space_press_count = 0
         self.space_press_timer = 0
         self.current_game = None
+        self.sfx = SoundFX()
+        self.achievement_notifications = []
+        self.win_anim_timer = 0
+        self.win_anim_particles = []
+        self.screen_glow_timer = 0
+        self.screen_shake_timer = 0
+        self.enable_screen_glow = True
+        self.enable_screen_shake = True
+        self.windowed_size = (self.screen_width, self.screen_height)
+
+        self.current_nickname = ""
+        self.login_nickname_input = ""
+        self.login_error = ""
+        self.save_status_message = ""
+        self.save_status_timer = 0
+        self.save_dir = os.path.join(os.path.dirname(__file__), "saves")
+        self.exports_dir = os.path.join(self.save_dir, "exports")
+        os.makedirs(self.save_dir, exist_ok=True)
+        os.makedirs(self.exports_dir, exist_ok=True)
+
+        self.theme_presets = {
+            "Neon": {
+                "bg": (10, 10, 35), "panel": (25, 35, 70), "accent": (0, 255, 255),
+                "text": (235, 245, 255), "subtext": (180, 210, 255), "success": (0, 255, 140),
+                "danger": (255, 70, 110), "button": (0, 110, 255), "button_hover": (0, 180, 255),
+                "text_on_button": (0, 0, 0),
+            },
+            "Light": {
+                "bg": (236, 242, 255), "panel": (218, 228, 245), "accent": (90, 140, 255),
+                "text": (30, 40, 70), "subtext": (65, 85, 130), "success": (70, 180, 110),
+                "danger": (210, 90, 90), "button": (135, 175, 255), "button_hover": (165, 200, 255),
+                "text_on_button": (20, 30, 50),
+            },
+            "Retro": {
+                "bg": (28, 24, 12), "panel": (58, 46, 22), "accent": (255, 190, 90),
+                "text": (255, 231, 180), "subtext": (220, 180, 120), "success": (140, 230, 120),
+                "danger": (255, 110, 90), "button": (170, 120, 50), "button_hover": (210, 150, 70),
+                "text_on_button": (20, 12, 6),
+            },
+            "Matrix": {
+                "bg": (4, 16, 6), "panel": (8, 30, 12), "accent": (0, 255, 90),
+                "text": (170, 255, 170), "subtext": (100, 220, 120), "success": (40, 255, 130),
+                "danger": (255, 80, 120), "button": (10, 70, 30), "button_hover": (20, 110, 45),
+                "text_on_button": (170, 255, 170),
+            },
+        }
+        self.current_theme = "Neon"
         
         self.version = GAME_VERSION
         
@@ -102,10 +232,58 @@ class Game:
             "play": Button(self.screen_width//2 - 140, 250, 280, 60, "PLAY"),
             "patch": Button(self.screen_width//2 - 140, 350, 280, 60, "PATCH NOTES"),
             "settings": Button(self.screen_width//2 - 140, 450, 280, 60, "SETTINGS"),
-            "exit": Button(self.screen_width//2 - 140, 550, 280, 60, "EXIT")
+            "themes": Button(self.screen_width//2 - 140, 550, 280, 60, "THEMES"),
+            "exit": Button(self.screen_width//2 - 140, 650, 280, 60, "SAVE & EXIT")
+        }
+        self.login_buttons = {
+            "login": Button(self.screen_width//2 - 120, self.screen_height//2 + 70, 240, 60, "LOGIN"),
+            "exit": Button(self.screen_width//2 - 120, self.screen_height//2 + 150, 240, 60, "EXIT"),
+        }
+        self.achievements_button = Button(30, self.screen_height - 90, 220, 50, "ACHIEVEMENTS", FONT_SMALL)
+        self.achievements_buttons = {
+            "back": Button(self.screen_width//2 - 100, self.screen_height - 100, 200, 60, "BACK")
+        }
+        self.theme_buttons = {}
+
+        self.achievements = {}
+        for i in range(1, 21):
+            self.achievements[f"level_{i}"] = {
+                "title": f"Level {i} Complete",
+                "desc": f"Dokonci level {i}",
+                "unlocked": False,
+            }
+        self.achievements["record_l1"] = {
+            "title": "Level 1 Record",
+            "desc": "Udrzuj nejlepsi cas v levelu 1",
+            "unlocked": False,
+        }
+        self.achievements["speed_l1"] = {
+            "title": "Speed Runner I",
+            "desc": "Dokonci level 1 se zbytkem alespon 3s",
+            "unlocked": False,
+        }
+        self.achievements["speed_l8"] = {
+            "title": "Bomb Specialist",
+            "desc": "Dokonci level 8 se zbytkem alespon 3s",
+            "unlocked": False,
+        }
+        self.achievements["all_levels"] = {
+            "title": "Mastermind",
+            "desc": "Dokonci vsech 20 levelu",
+            "unlocked": False,
         }
         
         self.patch_notes = [
+            {
+                "version": "1.9.0",
+                "notes": [
+                    "Level 12 redesigned: pick shape by name (no rotations)",
+                    "Level 15 simplified: fewer switches and easier logic",
+                    "Added Sound tab with master volume slider",
+                    "Softer click sounds and less annoying in-game SFX",
+                    "Simon Says: beep when color flashes"
+                ]
+            },
             {
                 "version": "1.8.0",
                 "notes": [
@@ -149,7 +327,12 @@ class Game:
             "800x600", "1024x768", "1280x720", "1366x768", "1600x900", "1920x1080"
         ]
         self.available_ui_scales = [75, 100, 125, 150]
-        self.settings_tab = "graphics"  # "graphics" or "developer"
+        self.sound_settings = {
+            "master_volume": 70,
+        }
+        self.sound_slider_dragging = False
+        self.sfx.set_master_volume(self.sound_settings["master_volume"] / 100.0)
+        self.settings_tab = "graphics"  # "graphics" or "developer" or "sound"
         # Settings buttons are built dynamically in draw_settings / _build_settings_rects
         self._settings_rects = {}  # filled each frame by draw_settings
         
@@ -177,7 +360,268 @@ class Game:
             "restart": Button(self.screen_width//2 - 100, 450, 200, 60, "RESTART"),
             "exit": Button(self.screen_width//2 - 100, 550, 200, 60, "EXIT")
         }
+        self._build_theme_buttons()
+        self._apply_theme_to_buttons()
     
+    def _scale(self):
+        """Combined scale factor: resolution * ui_scale"""
+        res_s = min(self.screen_width / 1920, self.screen_height / 1080)
+        ui_s = self.graphics_settings["ui_scale"] / 100.0
+        return res_s * ui_s
+
+    def _tc(self, key):
+        return self.theme_presets.get(self.current_theme, self.theme_presets["Neon"]).get(key, WHITE)
+
+    def _apply_theme_to_buttons(self):
+        btn_color = self._tc("button")
+        hover_color = self._tc("button_hover")
+        txt = self._tc("text_on_button")
+        groups = [
+            self.menu_buttons.values(), self.patch_buttons.values(), self.play_buttons.values(),
+            self.popup_buttons.values(), self.pause_buttons.values(), self.achievements_buttons.values(),
+            [self.achievements_button], self.theme_buttons.values(), self.login_buttons.values()
+        ]
+        for group in groups:
+            for button in group:
+                button.color = btn_color
+                button.hover_color = hover_color
+                button.text_color = txt
+
+    def _sanitize_nickname(self, nickname):
+        nickname = nickname.strip()
+        if not nickname:
+            return None
+        if not re.fullmatch(r"[A-Za-z0-9_\-]{3,20}", nickname):
+            return None
+        return nickname
+
+    def _save_file_path(self, nickname):
+        return os.path.join(self.save_dir, f"{nickname}.json")
+
+    def _default_save_data(self, nickname):
+        return {
+            "nickname": nickname,
+            "current_level": 1,
+            "unlocked_levels": 1,
+            "player_score": 0,
+            "current_theme": "Neon",
+            "player_settings": {
+                "screen_shake": True,
+                "screen_glow": True,
+                "master_volume": 70,
+            },
+            "inventory": [],
+            "level_stars": {},
+            "level_best_time": {},
+            "level_best_reaction_ms": {},
+            "level_best_moves": {},
+            "completed_levels": [],
+            "achievements": {},
+            "graphics": {
+                "resolution": self.graphics_settings["resolution"],
+                "fullscreen": self.graphics_settings["fullscreen"],
+                "vsync": self.graphics_settings["vsync"],
+                "ui_scale": self.graphics_settings["ui_scale"],
+            },
+        }
+
+    def _checksum_for_payload(self, payload):
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _collect_save_payload(self):
+        return {
+            "nickname": self.current_nickname,
+            "current_level": self.current_level,
+            "unlocked_levels": self.unlocked_levels,
+            "player_score": self.player_score,
+            "current_theme": self.current_theme,
+            "player_settings": {
+                "screen_shake": self.enable_screen_shake,
+                "screen_glow": self.enable_screen_glow,
+                "master_volume": self.sound_settings.get("master_volume", 70),
+            },
+            "inventory": list(self.player_inventory),
+            "level_stars": {str(k): int(v) for k, v in self.level_stars.items()},
+            "level_best_time": {str(k): float(v) for k, v in self.level_best_time.items()},
+            "level_best_reaction_ms": {str(k): int(v) for k, v in self.level_best_reaction_ms.items()},
+            "level_best_moves": {str(k): int(v) for k, v in self.level_best_moves.items()},
+            "completed_levels": sorted(int(x) for x in self.completed_levels),
+            "achievements": {k: bool(v.get("unlocked", False)) for k, v in self.achievements.items()},
+            "graphics": {
+                "resolution": self.graphics_settings["resolution"],
+                "fullscreen": self.graphics_settings["fullscreen"],
+                "vsync": self.graphics_settings["vsync"],
+                "ui_scale": self.graphics_settings["ui_scale"],
+            },
+        }
+
+    def save_game(self):
+        if not self.current_nickname:
+            return False
+        payload = self._collect_save_payload()
+        data = dict(payload)
+        data["checksum"] = self._checksum_for_payload(payload)
+        path = self._save_file_path(self.current_nickname)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            self.save_status_message = f"Save error: {e}"
+            self.save_status_timer = 180
+            return False
+
+    def _apply_loaded_save(self, data):
+        self.current_level = int(data.get("current_level", 1))
+        self.unlocked_levels = int(data.get("unlocked_levels", 1))
+        self.player_score = int(data.get("player_score", 0))
+        self.current_theme = data.get("current_theme", "Neon") if data.get("current_theme", "Neon") in self.theme_presets else "Neon"
+
+        ps = data.get("player_settings", {})
+        self.enable_screen_shake = bool(ps.get("screen_shake", True))
+        self.enable_screen_glow = bool(ps.get("screen_glow", True))
+        self.sound_settings["master_volume"] = int(ps.get("master_volume", self.sound_settings.get("master_volume", 70)))
+        self.sfx.set_master_volume(self.sound_settings["master_volume"] / 100.0)
+
+        self.player_inventory = list(data.get("inventory", []))
+        self.level_stars = defaultdict(int, {int(k): int(v) for k, v in data.get("level_stars", {}).items()})
+        self.level_best_time = {int(k): float(v) for k, v in data.get("level_best_time", {}).items()}
+        self.level_best_reaction_ms = {int(k): int(v) for k, v in data.get("level_best_reaction_ms", {}).items()}
+        self.level_best_moves = {int(k): int(v) for k, v in data.get("level_best_moves", {}).items()}
+        self.completed_levels = set(int(x) for x in data.get("completed_levels", []))
+
+        if 2 not in self.level_best_reaction_ms and 2 in self.level_best_time:
+            self.level_best_reaction_ms[2] = int(self.level_best_time[2] * 1000)
+            self.level_best_time.pop(2, None)
+
+        unlocked_map = data.get("achievements", {})
+        for k, ach in self.achievements.items():
+            ach["unlocked"] = bool(unlocked_map.get(k, ach.get("unlocked", False)))
+
+        graphics = data.get("graphics", {})
+        loaded_resolution = graphics.get("resolution", self.graphics_settings["resolution"])
+        loaded_vsync = bool(graphics.get("vsync", self.graphics_settings["vsync"]))
+        loaded_scale = int(graphics.get("ui_scale", self.graphics_settings["ui_scale"]))
+        loaded_scale = min(self.available_ui_scales, key=lambda v: abs(v - loaded_scale))
+        loaded_fullscreen = bool(graphics.get("fullscreen", self.graphics_settings["fullscreen"]))
+
+        self.graphics_settings["vsync"] = loaded_vsync
+        self.graphics_settings["ui_scale"] = loaded_scale
+        self.apply_ui_scale()
+
+        if loaded_resolution in self.available_resolutions:
+            self.change_resolution(loaded_resolution)
+        self.graphics_settings["fullscreen"] = loaded_fullscreen
+        if loaded_fullscreen:
+            desktop = pygame.display.get_desktop_sizes()[0]
+            self.screen_width, self.screen_height = desktop
+            self.screen = pygame.display.set_mode(desktop, pygame.FULLSCREEN)
+            self.graphics_settings["resolution"] = f"{self.screen_width}x{self.screen_height}"
+        else:
+            w, h = map(int, self.graphics_settings["resolution"].split("x"))
+            self.screen_width, self.screen_height = w, h
+            self.screen = pygame.display.set_mode((w, h))
+        self.initialize_ui_elements()
+
+    def login_or_create_save(self, nickname):
+        sanitized = self._sanitize_nickname(nickname)
+        if sanitized is None:
+            self.login_error = "Nickname: 3-20 znaku [A-Z a-z 0-9 _ -]"
+            return False
+
+        self.current_nickname = sanitized
+        path = self._save_file_path(sanitized)
+        if not os.path.exists(path):
+            data = self._default_save_data(sanitized)
+            payload = dict(data)
+            data["checksum"] = self._checksum_for_payload(payload)
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                self.login_error = f"Nelze vytvorit save: {e}"
+                return False
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            checksum = loaded.get("checksum", "")
+            payload = dict(loaded)
+            payload.pop("checksum", None)
+            if checksum and checksum != self._checksum_for_payload(payload):
+                self.login_error = "Save ma neplatny checksum (integrita)"
+                return False
+            self._apply_loaded_save(payload)
+        except Exception as e:
+            self.login_error = f"Nelze nacist save: {e}"
+            return False
+
+        self.login_error = ""
+        self.login_nickname_input = sanitized
+        self.state = GameState.MENU
+        self.save_status_message = f"Prihlasen: {self.current_nickname}"
+        self.save_status_timer = 120
+        return True
+
+    def export_save_zip(self):
+        if not self.current_nickname:
+            return False
+        if not self.save_game():
+            return False
+        src = self._save_file_path(self.current_nickname)
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        out_zip = os.path.join(self.exports_dir, f"{self.current_nickname}_{stamp}.zip")
+        try:
+            with zipfile.ZipFile(out_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.write(src, arcname=f"{self.current_nickname}.json")
+            self.save_status_message = f"Export OK: {os.path.basename(out_zip)}"
+            self.save_status_timer = 180
+            return True
+        except Exception as e:
+            self.save_status_message = f"Export error: {e}"
+            self.save_status_timer = 180
+            return False
+
+    def import_latest_save_zip(self):
+        if not self.current_nickname:
+            return False
+        prefix = f"{self.current_nickname}_"
+        candidates = [f for f in os.listdir(self.exports_dir) if f.startswith(prefix) and f.endswith(".zip")]
+        if not candidates:
+            self.save_status_message = "Import: zadny export nenalezen"
+            self.save_status_timer = 180
+            return False
+        candidates.sort(reverse=True)
+        latest = os.path.join(self.exports_dir, candidates[0])
+        try:
+            with zipfile.ZipFile(latest, "r") as zf:
+                member = f"{self.current_nickname}.json"
+                if member not in zf.namelist():
+                    self.save_status_message = "Import error: save nenalezen v ZIP"
+                    self.save_status_timer = 180
+                    return False
+                zf.extract(member, self.save_dir)
+            extracted = os.path.join(self.save_dir, f"{self.current_nickname}.json")
+            with open(extracted, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            checksum = loaded.get("checksum", "")
+            payload = dict(loaded)
+            payload.pop("checksum", None)
+            if checksum and checksum != self._checksum_for_payload(payload):
+                self.save_status_message = "Import error: neplatny checksum"
+                self.save_status_timer = 180
+                return False
+            self._apply_loaded_save(payload)
+            self.save_status_message = f"Import OK: {os.path.basename(latest)}"
+            self.save_status_timer = 180
+            self.save_game()
+            return True
+        except Exception as e:
+            self.save_status_message = f"Import error: {e}"
+            self.save_status_timer = 180
+            return False
+
     def change_resolution(self, resolution_str):
         """Change resolution, rebuild display and all UI"""
         try:
@@ -196,26 +640,46 @@ class Game:
             return False
     
     def _toggle_fullscreen(self):
-        """Toggle real fullscreen / windowed mode"""
+        """Toggle fullscreen similarly to F11 behavior."""
         self.graphics_settings["fullscreen"] = not self.graphics_settings["fullscreen"]
         if self.graphics_settings["fullscreen"]:
-            self.screen = pygame.display.set_mode(
-                (self.screen_width, self.screen_height), pygame.FULLSCREEN)
+            self.windowed_size = (self.screen_width, self.screen_height)
+            desktop = pygame.display.get_desktop_sizes()[0]
+            self.screen_width, self.screen_height = desktop
+            self.screen = pygame.display.set_mode(desktop, pygame.FULLSCREEN)
         else:
-            self.screen = pygame.display.set_mode(
-                (self.screen_width, self.screen_height))
+            self.screen_width, self.screen_height = self.windowed_size
+            self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
+        self.graphics_settings["resolution"] = f"{self.screen_width}x{self.screen_height}"
+        self.initialize_ui_elements()
+
+    def _build_theme_buttons(self):
+        self.theme_buttons = {}
+        s = self._scale()
+        names = ["Neon", "Light", "Retro", "Matrix"]
+        bw, bh = int(300 * s), int(64 * s)
+        row_gap = int(56 * s)
+        start_x = self.screen_width // 2 - bw // 2
+        start_y = int(170 * s)
+        f = pygame.font.Font(None, max(14, int(34 * s)))
+        for idx, name in enumerate(names):
+            x = start_x
+            y = start_y + idx * (bh + row_gap)
+            self.theme_buttons[name] = Button(x, y, bw, bh, name, f)
     
     def initialize_ui_elements(self):
-        """Reinitialize all UI elements for current resolution"""
+        """Reinitialize all UI elements for current resolution + ui_scale"""
         sw, sh = self.screen_width, self.screen_height
-        s = min(sw / 1920, sh / 1080)  # global scale factor
+        s = self._scale()
         bw, bh = int(280 * s), int(60 * s)
         self.menu_buttons = {
             "play":     Button(sw//2 - bw//2, int(250*s), bw, bh, "PLAY"),
             "patch":    Button(sw//2 - bw//2, int(350*s), bw, bh, "PATCH NOTES"),
             "settings": Button(sw//2 - bw//2, int(450*s), bw, bh, "SETTINGS"),
-            "exit":     Button(sw//2 - bw//2, int(550*s), bw, bh, "EXIT")
+            "themes":   Button(sw//2 - bw//2, int(550*s), bw, bh, "THEMES"),
+            "exit":     Button(sw//2 - bw//2, int(650*s), bw, bh, "SAVE & EXIT")
         }
+        self.achievements_button = Button(int(30*s), sh - int(90*s), int(240*s), int(50*s), "ACHIEVEMENTS", pygame.font.Font(None, max(12, int(28*s))))
         self.patch_buttons = {
             "back": Button(sw//2 - int(100*s), sh - int(100*s), int(200*s), int(60*s), "ZPĚT")
         }
@@ -233,16 +697,97 @@ class Game:
             "restart":  Button(sw//2 - int(100*s), int(450*s), int(200*s), int(60*s), "RESTART"),
             "exit":     Button(sw//2 - int(100*s), int(550*s), int(200*s), int(60*s), "EXIT")
         }
+        self.achievements_buttons = {
+            "back": Button(sw//2 - int(100*s), sh - int(100*s), int(200*s), int(60*s), "BACK")
+        }
+        self.login_buttons = {
+            "login": Button(sw//2 - int(120*s), sh//2 + int(70*s), int(240*s), int(60*s), "LOGIN"),
+            "exit": Button(sw//2 - int(120*s), sh//2 + int(150*s), int(240*s), int(60*s), "EXIT")
+        }
+        self._build_theme_buttons()
+        self._apply_theme_to_buttons()
         self.create_level_buttons()
+
+    def _unlock_achievement(self, key):
+        ach = self.achievements.get(key)
+        if not ach or ach["unlocked"]:
+            return
+        ach["unlocked"] = True
+        self.achievement_notifications.append({
+            "text": f"Achievement: {ach['title']}",
+            "timer": 120,
+            "max": 120,
+        })
+        self.sfx.play("level_success")
+
+    def _get_remaining_seconds(self):
+        if not self.current_game:
+            return None
+        if hasattr(self.current_game, "timer"):
+            return max(0.0, self.current_game.timer / FPS)
+        if hasattr(self.current_game, "time_left"):
+            return max(0.0, float(self.current_game.time_left))
+        return None
+
+    def _get_moves_used(self):
+        if not self.current_game:
+            return None
+        for attr in ("moves", "press_count", "move_count"):
+            if hasattr(self.current_game, attr):
+                try:
+                    return int(getattr(self.current_game, attr))
+                except Exception:
+                    return None
+        return None
+
+    def _get_current_elapsed_seconds(self):
+        if self.current_level_elapsed_snapshot is not None:
+            return self.current_level_elapsed_snapshot
+        if self.current_level_start_ticks <= 0:
+            return None
+        return max(0.0, (pygame.time.get_ticks() - self.current_level_start_ticks) / 1000.0)
+
+    def _calculate_stars(self, mistakes):
+        if mistakes <= 0:
+            return 3
+        if mistakes == 1:
+            return 2
+        return 1
+
+    def _start_win_animation(self):
+        self.win_anim_timer = 90
+        self.screen_glow_timer = 24
+        self.screen_shake_timer = 18
+        self.win_anim_particles = []
+        for _ in range(36):
+            self.win_anim_particles.append({
+                "x": random.randint(200, self.screen_width - 200),
+                "y": random.randint(120, self.screen_height - 200),
+                "vx": random.uniform(-2.2, 2.2),
+                "vy": random.uniform(-4.2, -1.2),
+                "size": random.randint(3, 7),
+                "col": random.choice([YELLOW, CYAN, GREEN, WHITE]),
+            })
         
     def create_level_buttons(self):
-        """Vytvoří tlačítka pro všech 20 levelů"""
+        """Create level buttons scaled to current resolution + ui_scale"""
+        sw, sh = self.screen_width, self.screen_height
+        s = self._scale()
+        btn_w = int(160 * s)
+        btn_h = int(100 * s)
+        gap_x = int(180 * s)
+        gap_y = int(120 * s)
+        cols = 5
+        total_w = cols * gap_x - (gap_x - btn_w)
+        start_x = (sw - total_w) // 2
+        start_y = int(150 * s)
+        f = pygame.font.Font(None, max(12, int(32 * s)))
         for i in range(1, 21):
-            col = (i - 1) % 5
-            row = (i - 1) // 5
-            x = 150 + col * 180
-            y = 150 + row * 120
-            self.level_buttons[i] = Button(x, y, 160, 100, f"LEVEL {i}", FONT_SMALL)
+            col = (i - 1) % cols
+            row = (i - 1) // cols
+            x = start_x + col * gap_x
+            y = start_y + row * gap_y
+            self.level_buttons[i] = Button(x, y, btn_w, btn_h, f"LEVEL {i}", f)
     
     def apply_ui_scale(self):
         """Apply UI scale to fonts and reinitialize all UI elements"""
@@ -255,42 +800,161 @@ class Game:
         self.initialize_ui_elements()
     
     def draw_menu(self):
-        """Kreslí hlavní menu"""
-        self.screen.fill((20, 40, 80))
-        
-  
-        title = FONT_LARGE.render("MindLock!", True, CYAN)
-        title_rect = title.get_rect(center=(self.screen_width//2, 90))
-       
-        shadow = FONT_LARGE.render("MindLock!", True, (0, 50, 80))
+        """Draw main menu – resolution & UI-scale adaptive"""
+        sw, sh = self.screen_width, self.screen_height
+        s = self._scale()
+        self._apply_theme_to_buttons()
+        self.screen.fill(self._tc("bg"))
+
+        f_title = pygame.font.Font(None, max(20, int(80 * s)))
+        f_sub   = pygame.font.Font(None, max(12, int(32 * s)))
+
+        title = f_title.render("MindLock!", True, self._tc("accent"))
+        title_rect = title.get_rect(center=(sw//2, int(90*s)))
+        shadow = f_title.render("MindLock!", True, (0, 50, 80))
         self.screen.blit(shadow, (title_rect.x + 3, title_rect.y + 3))
         self.screen.blit(title, title_rect)
-        
-      
-        pygame.draw.line(self.screen, CYAN, (self.screen_width//2 - 300, 160), (self.screen_width//2 - 100, 160), 2)
-        pygame.draw.line(self.screen, CYAN, (self.screen_width//2 + 100, 160), (self.screen_width//2 + 300, 160), 2)
-        
 
-        subtitle = FONT_SMALL.render("Puzzle Game", True, (200, 200, 255))
-        subtitle_rect = subtitle.get_rect(center=(self.screen_width//2, 180))
-        self.screen.blit(subtitle, subtitle_rect)
-        
-  
+        line_y = int(160*s)
+        pygame.draw.line(self.screen, self._tc("accent"), (sw//2 - int(300*s), line_y), (sw//2 - int(100*s), line_y), 2)
+        pygame.draw.line(self.screen, self._tc("accent"), (sw//2 + int(100*s), line_y), (sw//2 + int(300*s), line_y), 2)
+
+        subtitle = f_sub.render("Puzzle Game", True, self._tc("subtext"))
+        self.screen.blit(subtitle, subtitle.get_rect(center=(sw//2, int(180*s))))
+
         for button in self.menu_buttons.values():
             button.draw(self.screen)
+        self.achievements_button.draw(self.screen)
+
+        if self.current_nickname:
+            who = f_sub.render(f"Player: {self.current_nickname}", True, self._tc("subtext"))
+            self.screen.blit(who, (20, 20))
+        if self.save_status_timer > 0 and self.save_status_message:
+            msg = f_sub.render(self.save_status_message, True, YELLOW)
+            self.screen.blit(msg, (20, sh - int(36*s)))
+
+    def draw_login(self):
+        sw, sh = self.screen_width, self.screen_height
+        s = self._scale()
+        self.screen.fill(self._tc("bg"))
+
+        f_title = pygame.font.Font(None, max(20, int(84 * s)))
+        f_sub = pygame.font.Font(None, max(14, int(36 * s)))
+        f_err = pygame.font.Font(None, max(14, int(30 * s)))
+
+        title = f_title.render("MindLock!", True, self._tc("accent"))
+        self.screen.blit(title, title.get_rect(center=(sw//2, int(180*s))))
+
+        prompt = f_sub.render("Zadej nickname kvůli uložení postupu", True, self._tc("text"))
+        self.screen.blit(prompt, prompt.get_rect(center=(sw//2, int(290*s))))
+
+        input_w, input_h = int(520*s), int(64*s)
+        input_rect = pygame.Rect(sw//2 - input_w//2, sh//2 - input_h//2, input_w, input_h)
+        self.login_input_rect = input_rect
+        pygame.draw.rect(self.screen, self._tc("panel"), input_rect, border_radius=8)
+        pygame.draw.rect(self.screen, self._tc("accent"), input_rect, 2, border_radius=8)
+
+        typed = self.login_nickname_input if self.login_nickname_input else "..."
+        typed_col = self._tc("text") if self.login_nickname_input else self._tc("subtext")
+        typed_surf = f_sub.render(typed, True, typed_col)
+        self.screen.blit(typed_surf, (input_rect.x + int(16*s), input_rect.y + int(16*s)))
+
+        self.login_buttons["login"].draw(self.screen)
+        self.login_buttons["exit"].draw(self.screen)
+
+        hint = f_sub.render("ENTER = login", True, self._tc("subtext"))
+        self.screen.blit(hint, hint.get_rect(center=(sw//2, self.login_buttons["login"].rect.bottom + int(34*s))))
+
+        if self.login_error:
+            err = f_err.render(self.login_error, True, self._tc("danger"))
+            self.screen.blit(err, err.get_rect(center=(sw//2, self.login_buttons["login"].rect.bottom + int(72*s))))
+
+    def draw_achievements(self):
+        self._apply_theme_to_buttons()
+        self.screen.fill(self._tc("bg"))
+        title = FONT_LARGE.render("ACHIEVEMENTS", True, self._tc("accent"))
+        self.screen.blit(title, title.get_rect(center=(self.screen_width // 2, 60)))
+
+        y = 130
+        lh = 32
+        unlocked = sum(1 for a in self.achievements.values() if a["unlocked"])
+        total = len(self.achievements)
+        p = FONT_SMALL.render(f"Unlocked: {unlocked}/{total}", True, self._tc("accent"))
+        self.screen.blit(p, (80, 95))
+
+        if 1 in self.level_best_time:
+            rec = FONT_SMALL.render(f"Level 1 record: {self.level_best_time[1]:.2f}s", True, GREEN)
+            self.screen.blit(rec, (self.screen_width - rec.get_width() - 80, 95))
+
+        for key, ach in self.achievements.items():
+            if y > self.screen_height - 140:
+                break
+            col = GREEN if ach["unlocked"] else GRAY
+            mark = "[X]" if ach["unlocked"] else "[ ]"
+            line = FONT_TINY.render(f"{mark} {ach['title']} - {ach['desc']}", True, col)
+            self.screen.blit(line, (80, y))
+            y += lh
+
+        self.achievements_buttons["back"].draw(self.screen)
+
+    def draw_themes(self):
+        self._apply_theme_to_buttons()
+        self.screen.fill(self._tc("bg"))
+        title = FONT_LARGE.render("THEMES", True, self._tc("accent"))
+        self.screen.blit(title, title.get_rect(center=(self.screen_width // 2, 60)))
+
+        active = FONT_SMALL.render(f"Aktivni motiv: {self.current_theme}", True, self._tc("text"))
+        self.screen.blit(active, active.get_rect(center=(self.screen_width // 2, 120)))
+
+        desc_map = {
+            "Neon": "Jasne svitici barvy a elektricky efekt.",
+            "Light": "Svetly pastelovy motiv s jemnym glow.",
+            "Retro": "Nostalgicka paleta ve stylu klasickych her.",
+            "Matrix": "Tmavy motiv se zelenym digitalnim nadychem.",
+        }
+        for name, button in self.theme_buttons.items():
+            button.hovered = (name == self.current_theme)
+            button.draw(self.screen)
+            d = FONT_TINY.render(desc_map[name], True, self._tc("subtext"))
+            self.screen.blit(d, d.get_rect(center=(button.rect.centerx, button.rect.bottom + 18)))
+
+        self.achievements_buttons["back"].draw(self.screen)
+
+    def _draw_progress_bar(self):
+        bw, bh = 260, 16
+        x = self.screen_width - bw - 20
+        y = 40
+        pygame.draw.rect(self.screen, (40, 40, 60), (x, y, bw, bh), border_radius=8)
+        fill = int(bw * (self.current_level / 20.0))
+        pygame.draw.rect(self.screen, (0, 190, 120), (x, y, fill, bh), border_radius=8)
+        pygame.draw.rect(self.screen, WHITE, (x, y, bw, bh), 2, border_radius=8)
+
+    def _draw_achievement_notifications(self):
+        base_y = 20
+        for idx, note in enumerate(self.achievement_notifications[:3]):
+            t = note["timer"]
+            alpha = 255
+            if t < 20:
+                alpha = int(255 * (t / 20))
+            panel = pygame.Surface((420, 44), pygame.SRCALPHA)
+            panel.fill((20, 30, 55, min(220, alpha)))
+            pygame.draw.rect(panel, (80, 200, 255, alpha), panel.get_rect(), 2, border_radius=8)
+            txt = FONT_TINY.render(note["text"], True, (255, 255, 255))
+            panel.blit(txt, (12, 12))
+            self.screen.blit(panel, (self.screen_width - 440, base_y + idx * 52))
     
     def draw_patch_notes(self):
         """Kreslí patch notes"""
-        self.screen.fill(DARK_BLUE)
+        self.screen.fill(self._tc("bg"))
         
-        title = FONT_LARGE.render("PATCH NOTES", True, CYAN)
+        title = FONT_LARGE.render("PATCH NOTES", True, self._tc("accent"))
         title_rect = title.get_rect(center=(self.screen_width//2, 40))
         self.screen.blit(title, title_rect)
         
 
         box_rect = pygame.Rect(150, 120, self.screen_width - 300, 500)
-        pygame.draw.rect(self.screen, DARK_GRAY, box_rect)
-        pygame.draw.rect(self.screen, CYAN, box_rect, 3)
+        pygame.draw.rect(self.screen, self._tc("panel"), box_rect)
+        pygame.draw.rect(self.screen, self._tc("accent"), box_rect, 3)
         
      
         y = 140
@@ -315,29 +979,28 @@ class Game:
         self.patch_buttons["back"].draw(self.screen)
     
     def draw_settings(self):
-        """Resolution-adaptive settings screen with tabs."""
+        """Resolution & UI-scale adaptive settings with tabs, no overlap."""
         sw, sh = self.screen_width, self.screen_height
-        s = min(sw / 1920, sh / 1080)
-        self.screen.fill((0, 0, 51))  # dark navy
-        rects = {}  # collect clickable rects this frame
+        s = self._scale()
+        self.screen.fill(self._tc("bg"))
+        rects = {}
 
         # Scaled fonts
         f_title = pygame.font.Font(None, max(20, int(72 * s)))
         f_btn   = pygame.font.Font(None, max(14, int(36 * s)))
         f_val   = pygame.font.Font(None, max(14, int(40 * s)))
-        f_small = pygame.font.Font(None, max(12, int(28 * s)))
 
         # --- Title ---
-        title_surf = f_title.render("SETTINGS", True, CYAN)
+        title_surf = f_title.render("SETTINGS", True, self._tc("accent"))
         self.screen.blit(title_surf, title_surf.get_rect(center=(sw//2, int(50*s))))
 
         # --- Tabs ---
-        tab_w, tab_h = int(200*s), int(50*s)
+        tab_w, tab_h = int(180*s), int(50*s)
         tab_gap = int(20*s)
-        tabs_total = tab_w * 2 + tab_gap
+        tabs_total = tab_w * 3 + tab_gap * 2
         tx = sw//2 - tabs_total//2
         ty = int(110*s)
-        for i, (tab_id, tab_label) in enumerate([("graphics", "Graphics"), ("developer", "Developer")]):
+        for i, (tab_id, tab_label) in enumerate([("graphics", "Graphics"), ("sound", "Sound"), ("developer", "Developer")]):
             r = pygame.Rect(tx + i*(tab_w + tab_gap), ty, tab_w, tab_h)
             active = self.settings_tab == tab_id
             col = (0, 102, 255) if active else (40, 40, 80)
@@ -347,13 +1010,15 @@ class Game:
             self.screen.blit(lbl, lbl.get_rect(center=r.center))
             rects[f"tab_{tab_id}"] = r
 
-        # --- Content area ---
-        cy = ty + tab_h + int(40*s)  # current Y cursor
-        row_h = int(55*s)
+        # --- Content ---
+        cy = ty + tab_h + int(40*s)
+        row_h = int(60*s)       # enough vertical space per row
         btn_w = int(50*s)
         btn_h = int(44*s)
         toggle_w = int(300*s)
-        cx = sw // 2  # center X
+        cx = sw // 2
+        label_x = cx - int(220*s)   # labels left of center
+        val_gap = int(70*s)         # gap between value and +/- buttons
 
         def _draw_btn(rect, text, font=f_btn):
             pygame.draw.rect(self.screen, (0, 102, 255), rect)
@@ -362,12 +1027,11 @@ class Game:
             self.screen.blit(t, t.get_rect(center=rect.center))
 
         if self.settings_tab == "graphics":
-            # Row: FPS
+            # FPS
             lbl = f_btn.render("FPS:", True, WHITE)
-            lbl_x = cx - int(180*s)
-            self.screen.blit(lbl, (lbl_x, cy + (row_h - lbl.get_height())//2))
-            minus_r = pygame.Rect(cx - int(20*s) - btn_w, cy + (row_h-btn_h)//2, btn_w, btn_h)
-            plus_r  = pygame.Rect(cx + int(20*s),         cy + (row_h-btn_h)//2, btn_w, btn_h)
+            self.screen.blit(lbl, (label_x, cy + (row_h - lbl.get_height())//2))
+            minus_r = pygame.Rect(cx - val_gap - btn_w, cy + (row_h-btn_h)//2, btn_w, btn_h)
+            plus_r  = pygame.Rect(cx + val_gap,         cy + (row_h-btn_h)//2, btn_w, btn_h)
             _draw_btn(minus_r, "-")
             _draw_btn(plus_r, "+")
             val = f_val.render(str(self.fps), True, YELLOW)
@@ -376,35 +1040,35 @@ class Game:
             rects["fps_up"] = plus_r
             cy += row_h
 
-            # Row: Resolution
+            # Resolution
             lbl = f_btn.render("Resolution:", True, WHITE)
-            self.screen.blit(lbl, (lbl_x, cy + (row_h - lbl.get_height())//2))
+            self.screen.blit(lbl, (label_x, cy + (row_h - lbl.get_height())//2))
             res_val = f_val.render(self.graphics_settings["resolution"], True, YELLOW)
             self.screen.blit(res_val, res_val.get_rect(center=(cx, cy + row_h//2)))
-            arr_r = pygame.Rect(cx + int(90*s), cy + (row_h-btn_h)//2, btn_w, btn_h)
+            arr_r = pygame.Rect(cx + val_gap, cy + (row_h-btn_h)//2, btn_w, btn_h)
             _draw_btn(arr_r, ">")
             rects["resolution_next"] = arr_r
             cy += row_h
 
-            # Row: Fullscreen
+            # Fullscreen
             fs_text = "Fullscreen: ON" if self.graphics_settings["fullscreen"] else "Fullscreen: OFF"
             fs_r = pygame.Rect(cx - toggle_w//2, cy + (row_h-btn_h)//2, toggle_w, btn_h)
             _draw_btn(fs_r, fs_text)
             rects["fullscreen"] = fs_r
             cy += row_h
 
-            # Row: VSync
+            # VSync
             vs_text = "VSync: ON" if self.graphics_settings["vsync"] else "VSync: OFF"
             vs_r = pygame.Rect(cx - toggle_w//2, cy + (row_h-btn_h)//2, toggle_w, btn_h)
             _draw_btn(vs_r, vs_text)
             rects["vsync"] = vs_r
             cy += row_h
 
-            # Row: UI Scale
+            # UI Scale
             lbl = f_btn.render("UI Scale:", True, WHITE)
-            self.screen.blit(lbl, (lbl_x, cy + (row_h - lbl.get_height())//2))
-            minus_r2 = pygame.Rect(cx - int(20*s) - btn_w, cy + (row_h-btn_h)//2, btn_w, btn_h)
-            plus_r2  = pygame.Rect(cx + int(20*s),         cy + (row_h-btn_h)//2, btn_w, btn_h)
+            self.screen.blit(lbl, (label_x, cy + (row_h - lbl.get_height())//2))
+            minus_r2 = pygame.Rect(cx - val_gap - btn_w, cy + (row_h-btn_h)//2, btn_w, btn_h)
+            plus_r2  = pygame.Rect(cx + val_gap,         cy + (row_h-btn_h)//2, btn_w, btn_h)
             _draw_btn(minus_r2, "-")
             _draw_btn(plus_r2, "+")
             val2 = f_val.render(f"{self.graphics_settings['ui_scale']}%", True, YELLOW)
@@ -413,113 +1077,207 @@ class Game:
             rects["scale_up"] = plus_r2
             cy += row_h
 
+        elif self.settings_tab == "sound":
+            lbl = f_btn.render("Master Volume", True, WHITE)
+            self.screen.blit(lbl, lbl.get_rect(center=(cx, cy + row_h//2 - int(10*s))))
+
+            slider_w = int(420 * s)
+            slider_h = max(6, int(10 * s))
+            slider_x = cx - slider_w // 2
+            slider_y = cy + int(42 * s)
+            slider_r = pygame.Rect(slider_x, slider_y, slider_w, slider_h)
+
+            pygame.draw.rect(self.screen, (40, 55, 90), slider_r, border_radius=6)
+            fill_w = int(slider_w * (self.sound_settings["master_volume"] / 100.0))
+            if fill_w > 0:
+                pygame.draw.rect(self.screen, (0, 140, 255), pygame.Rect(slider_x, slider_y, fill_w, slider_h), border_radius=6)
+
+            knob_x = slider_x + fill_w
+            knob_x = max(slider_x, min(slider_x + slider_w, knob_x))
+            knob_r = max(8, int(12 * s))
+            pygame.draw.circle(self.screen, WHITE, (knob_x, slider_y + slider_h // 2), knob_r)
+            pygame.draw.circle(self.screen, (0, 140, 255), (knob_x, slider_y + slider_h // 2), knob_r, 2)
+
+            vol_val = f_val.render(f"{self.sound_settings['master_volume']}%", True, YELLOW)
+            self.screen.blit(vol_val, vol_val.get_rect(center=(cx, slider_y + int(38 * s))))
+
+            rects["master_volume_slider"] = slider_r
+            cy += int(120 * s)
+
         else:  # developer tab
             info_lines = [
                 f"Developer: Stepan Sitina",
                 f"Version: {self.version}",
                 f"Levels: 20",
                 f"Game modes: 20",
+                f"Player: {self.current_nickname if self.current_nickname else '-'}",
             ]
             for line in info_lines:
                 t = f_btn.render(line, True, WHITE)
                 self.screen.blit(t, t.get_rect(center=(cx, cy + row_h//2)))
                 cy += row_h
 
-        # --- BACK button (bottom center) ---
+            dev_btn_w = int(320 * s)
+            dev_btn_h = int(48 * s)
+            gap = int(14 * s)
+
+            def _dev_button(key, text):
+                nonlocal cy
+                r = pygame.Rect(cx - dev_btn_w // 2, cy, dev_btn_w, dev_btn_h)
+                _draw_btn(r, text)
+                rects[key] = r
+                cy += dev_btn_h + gap
+
+            _dev_button("save_now", "SAVE NOW")
+            _dev_button("export_zip", "EXPORT ZIP")
+            _dev_button("import_zip", "IMPORT LATEST ZIP")
+
+            if self.save_status_timer > 0 and self.save_status_message:
+                status = f_btn.render(self.save_status_message, True, YELLOW)
+                self.screen.blit(status, status.get_rect(center=(cx, cy + int(20*s))))
+
+        # BACK button
         back_w, back_h = int(220*s), int(60*s)
         back_r = pygame.Rect(cx - back_w//2, sh - int(90*s), back_w, back_h)
         _draw_btn(back_r, "BACK")
         rects["back"] = back_r
 
         self._settings_rects = rects
+
+    def _set_master_volume_from_slider_x(self, mouse_x):
+        slider = self._settings_rects.get("master_volume_slider")
+        if not slider or slider.width <= 0:
+            return
+        ratio = (mouse_x - slider.x) / slider.width
+        ratio = max(0.0, min(1.0, ratio))
+        vol = int(round(ratio * 100))
+        self.sound_settings["master_volume"] = vol
+        self.sfx.set_master_volume(vol / 100.0)
     
     def draw_play_menu(self):
-        """Kreslí menu pro výběr levelů"""
-        self.screen.fill(DARK_BLUE)
-        
-        title = FONT_LARGE.render("VYBRAT LEVEL", True, CYAN)
-        title_rect = title.get_rect(center=(self.screen_width//2, 30))
-        self.screen.blit(title, title_rect)
-        
+        """Draw level selection – resolution & UI-scale adaptive"""
+        sw, sh = self.screen_width, self.screen_height
+        s = self._scale()
+        self.screen.fill(self._tc("bg"))
+
+        f_title = pygame.font.Font(None, max(20, int(72 * s)))
+        f_lbl   = pygame.font.Font(None, max(12, int(32 * s)))
+
+        title = f_title.render("VYBRAT LEVEL", True, self._tc("accent"))
+        self.screen.blit(title, title.get_rect(center=(sw//2, int(50*s))))
+
         for level_num, button in self.level_buttons.items():
             if level_num <= self.unlocked_levels:
                 if level_num in self.completed_levels:
                     pygame.draw.rect(self.screen, GREEN, button.rect)
                     pygame.draw.rect(self.screen, YELLOW, button.rect, 3)
-                    done_text = FONT_SMALL.render(f"LEVEL {level_num}*", True, BLACK)
-                    done_rect = done_text.get_rect(center=button.rect.center)
-                    self.screen.blit(done_text, done_rect)
+                    done_text = f_lbl.render(f"LEVEL {level_num}*", True, BLACK)
+                    self.screen.blit(done_text, done_text.get_rect(center=button.rect.center))
                 else:
                     button.draw(self.screen)
             else:
-                # No special display for levels beyond 19
                 pygame.draw.rect(self.screen, DARK_GRAY, button.rect)
                 pygame.draw.rect(self.screen, GRAY, button.rect, 3)
-                lock_text = FONT_SMALL.render("LOCKED", True, RED)
-                lock_rect = lock_text.get_rect(center=button.rect.center)
-                self.screen.blit(lock_text, lock_rect)
-        
+                lock_text = f_lbl.render("LOCKED", True, RED)
+                self.screen.blit(lock_text, lock_text.get_rect(center=button.rect.center))
+
         self.play_buttons["back"].draw(self.screen)
     
     def draw_popup_menu(self):
-        """Kreslí popup menu po skončení levelu"""
-
-        overlay = pygame.Surface((self.screen_width, self.screen_height))
+        """Popup menu after level ends – scaled"""
+        sw, sh = self.screen_width, self.screen_height
+        s = self._scale()
+        overlay = pygame.Surface((sw, sh))
         overlay.set_alpha(200)
         overlay.fill(BLACK)
         self.screen.blit(overlay, (0, 0))
-        
-        if self.game_won:
-            title = FONT_LARGE.render("YOU WON!", True, GREEN)
-        else:
-            title = FONT_LARGE.render("YOU LOST!", True, RED)
-        
-        title_rect = title.get_rect(center=(self.screen_width//2, 250))
-        self.screen.blit(title, title_rect)
-        
-        # Zobraz čas pro ReactionTime
+
+        f_title = pygame.font.Font(None, max(20, int(80 * s)))
+        f_info  = pygame.font.Font(None, max(14, int(50 * s)))
+
+        txt = "YOU WON!" if self.game_won else "YOU LOST!"
+        col = GREEN if self.game_won else RED
+        title = f_title.render(txt, True, col)
+        self.screen.blit(title, title.get_rect(center=(sw//2, int(250*s))))
+
+        stars = self.level_stars.get(self.current_level, 0)
+        stars_txt = f_info.render(f"Stars: {stars}/3", True, YELLOW)
+        self.screen.blit(stars_txt, stars_txt.get_rect(center=(sw//2, int(315*s))))
+
         if hasattr(self.current_game, 'reaction_time_ms') and self.current_game.reaction_time_ms > 0:
-            time_text = FONT_MEDIUM.render(f"Cas: {self.current_game.reaction_time_ms} ms", True, YELLOW)
-            self.screen.blit(time_text, (self.screen_width//2 - 180, 350))
-        
+            cur_t = f_info.render(f"Current time: {self.current_game.reaction_time_ms} ms", True, WHITE)
+            self.screen.blit(cur_t, cur_t.get_rect(center=(sw//2, int(340*s))))
+        elif self.current_level == 2:
+            current_elapsed = self._get_current_elapsed_seconds()
+            if current_elapsed is not None:
+                cur_t = f_info.render(f"Current time: {int(current_elapsed * 1000)} ms", True, WHITE)
+                self.screen.blit(cur_t, cur_t.get_rect(center=(sw//2, int(340*s))))
+        else:
+            current_elapsed = self._get_current_elapsed_seconds()
+            if current_elapsed is not None:
+                cur_t = f_info.render(f"Current time: {current_elapsed:.2f}s", True, WHITE)
+                self.screen.blit(cur_t, cur_t.get_rect(center=(sw//2, int(340*s))))
+
+        if self.current_level in self.level_best_reaction_ms:
+            best_t = f_info.render(f"Best time: {self.level_best_reaction_ms[self.current_level]} ms", True, CYAN)
+            self.screen.blit(best_t, best_t.get_rect(center=(sw//2, int(370*s))))
+        elif self.current_level == 2 and self.current_level in self.level_best_time:
+            best_ms = int(self.level_best_time[self.current_level] * 1000)
+            best_t = f_info.render(f"Best time: {best_ms} ms", True, CYAN)
+            self.screen.blit(best_t, best_t.get_rect(center=(sw//2, int(370*s))))
+        elif self.current_level in self.level_best_time:
+            best_t = f_info.render(f"Best time: {self.level_best_time[self.current_level]:.2f}s", True, CYAN)
+            self.screen.blit(best_t, best_t.get_rect(center=(sw//2, int(370*s))))
+        elif self.current_level in self.level_best_moves:
+            best_m = f_info.render(f"Best moves: {self.level_best_moves[self.current_level]}", True, CYAN)
+            self.screen.blit(best_m, best_m.get_rect(center=(sw//2, int(360*s))))
+
+        if hasattr(self.current_game, 'reaction_time_ms') and self.current_game.reaction_time_ms > 0:
+            time_text = f_info.render(f"Cas: {self.current_game.reaction_time_ms} ms", True, YELLOW)
+            self.screen.blit(time_text, time_text.get_rect(center=(sw//2, int(400*s))))
+
         self.popup_buttons["menu"].draw(self.screen)
         self.popup_buttons["restart"].draw(self.screen)
-        
         if self.game_won and self.current_level < 20:
             self.popup_buttons["next"].draw(self.screen)
     
     def draw_pause_menu(self):
-        """Kreslí pause menu"""
-        overlay = pygame.Surface((self.screen_width, self.screen_height))
+        """Pause menu – scaled"""
+        sw, sh = self.screen_width, self.screen_height
+        s = self._scale()
+        overlay = pygame.Surface((sw, sh))
         overlay.set_alpha(200)
         overlay.fill(BLACK)
         self.screen.blit(overlay, (0, 0))
-        
-        title = FONT_LARGE.render("PAUSE", True, YELLOW)
-        title_rect = title.get_rect(center=(self.screen_width//2, 200))
-        self.screen.blit(title, title_rect)
-        
+
+        f_title = pygame.font.Font(None, max(20, int(80 * s)))
+        title = f_title.render("PAUSE", True, YELLOW)
+        self.screen.blit(title, title.get_rect(center=(sw//2, int(200*s))))
+
         self.pause_buttons["continue"].draw(self.screen)
         self.pause_buttons["restart"].draw(self.screen)
         self.pause_buttons["exit"].draw(self.screen)
     
     def draw_hint_popup(self):
-        """Kreslí hint popup s word-wrapem"""
-        overlay = pygame.Surface((self.screen_width, self.screen_height))
+        """Hint popup with word-wrap – scaled"""
+        sw, sh = self.screen_width, self.screen_height
+        s = self._scale()
+        overlay = pygame.Surface((sw, sh))
         overlay.set_alpha(180)
         overlay.fill(BLACK)
         self.screen.blit(overlay, (0, 0))
-        
-        hint_title = FONT_LARGE.render("NAPOVEDA", True, YELLOW)
-        hint_title_rect = hint_title.get_rect(center=(self.screen_width//2, 280))
-        self.screen.blit(hint_title, hint_title_rect)
-        
+
+        f_title = pygame.font.Font(None, max(20, int(80 * s)))
+        f_body  = pygame.font.Font(None, max(14, int(50 * s)))
+        f_close = pygame.font.Font(None, max(12, int(32 * s)))
+
+        title = f_title.render("NAPOVEDA", True, YELLOW)
+        self.screen.blit(title, title.get_rect(center=(sw//2, int(280*s))))
+
         hint = self.current_game.get_hint()
-        # Word-wrap the hint into lines that fit on screen
         max_chars = 55
         words = hint.split()
-        lines = []
-        cur = ""
+        lines, cur = [], ""
         for w in words:
             if len(cur) + len(w) + 1 <= max_chars:
                 cur = cur + " " + w if cur else w
@@ -528,76 +1286,149 @@ class Game:
                 cur = w
         if cur:
             lines.append(cur)
-        
-        # Calculate box size
-        line_h = 42
-        total_h = len(lines) * line_h + 40
-        box_w = 900
-        box_y = 370
-        box_rect = pygame.Rect(self.screen_width//2 - box_w//2, box_y, box_w, total_h)
+
+        line_h = int(42 * s)
+        total_h = len(lines) * line_h + int(40 * s)
+        box_w = int(900 * s)
+        box_y = int(370 * s)
+        box_rect = pygame.Rect(sw//2 - box_w//2, box_y, box_w, total_h)
         pygame.draw.rect(self.screen, BLUE, box_rect)
         pygame.draw.rect(self.screen, CYAN, box_rect, 3)
-        
+
         for i, line in enumerate(lines):
-            hint_text = FONT_MEDIUM.render(line, True, GREEN)
-            hint_rect = hint_text.get_rect(center=(self.screen_width//2, box_y + 20 + i * line_h + line_h//2))
-            self.screen.blit(hint_text, hint_rect)
-        
-        close_text = FONT_SMALL.render("Klikni kdekoliv pro zavreni", True, WHITE)
-        close_rect = close_text.get_rect(center=(self.screen_width//2, box_y + total_h + 40))
-        self.screen.blit(close_text, close_rect)
+            ht = f_body.render(line, True, GREEN)
+            self.screen.blit(ht, ht.get_rect(center=(sw//2, box_y + int(20*s) + i*line_h + line_h//2)))
+
+        ct = f_close.render("Klikni kdekoliv pro zavreni", True, WHITE)
+        self.screen.blit(ct, ct.get_rect(center=(sw//2, box_y + total_h + int(40*s))))
     
     def handle_menu_click(self, pos):
         """Zpracuje klik v menu"""
         if self.menu_buttons["play"].is_clicked(pos):
+            self.sfx.play("menu_click")
             self.state = GameState.PLAYING
         elif self.menu_buttons["patch"].is_clicked(pos):
+            self.sfx.play("menu_click")
             self.state = GameState.PATCH_NOTES
         elif self.menu_buttons["settings"].is_clicked(pos):
+            self.sfx.play("menu_click")
             self.state = GameState.SETTINGS
+        elif self.menu_buttons["themes"].is_clicked(pos):
+            self.sfx.play("menu_click")
+            self.state = GameState.THEMES
         elif self.menu_buttons["exit"].is_clicked(pos):
+            self.sfx.play("menu_click")
+            self.save_game()
             self.running = False
+        elif self.achievements_button.is_clicked(pos):
+            self.sfx.play("menu_click")
+            self.state = GameState.ACHIEVEMENTS
     
     def handle_patch_click(self, pos):
         """Zpracuje klik v patch notes"""
         if self.patch_buttons["back"].is_clicked(pos):
+            self.sfx.play("menu_click")
             self.state = GameState.MENU
+
+    def handle_achievements_click(self, pos):
+        if self.achievements_buttons["back"].is_clicked(pos):
+            self.sfx.play("menu_click")
+            self.state = GameState.MENU
+
+    def handle_themes_click(self, pos):
+        for name, button in self.theme_buttons.items():
+            if button.is_clicked(pos):
+                self.sfx.play("menu_click")
+                self.current_theme = name
+                self.save_game()
+                return
+        if self.achievements_buttons["back"].is_clicked(pos):
+            self.sfx.play("menu_click")
+            self.state = GameState.MENU
+
+    def handle_login_click(self, pos):
+        if self.login_buttons["login"].is_clicked(pos):
+            self.sfx.play("menu_click")
+            self.login_or_create_save(self.login_nickname_input)
+        elif self.login_buttons["exit"].is_clicked(pos):
+            self.sfx.play("menu_click")
+            self.running = False
     
     def handle_settings_click(self, pos):
         """Handle clicks on the dynamically-built settings UI."""
         R = self._settings_rects
+        save_needed = False
         # Tabs
         if R.get("tab_graphics") and R["tab_graphics"].collidepoint(pos):
+            self.sfx.play("menu_click")
             self.settings_tab = "graphics"
+        elif R.get("tab_sound") and R["tab_sound"].collidepoint(pos):
+            self.sfx.play("menu_click")
+            self.settings_tab = "sound"
         elif R.get("tab_developer") and R["tab_developer"].collidepoint(pos):
+            self.sfx.play("menu_click")
             self.settings_tab = "developer"
         # Graphics controls
         elif R.get("fps_down") and R["fps_down"].collidepoint(pos):
+            self.sfx.play("menu_click")
             self.fps = max(10, self.fps - 10)
+            save_needed = True
         elif R.get("fps_up") and R["fps_up"].collidepoint(pos):
+            self.sfx.play("menu_click")
             self.fps = min(240, self.fps + 10)
+            save_needed = True
         elif R.get("resolution_next") and R["resolution_next"].collidepoint(pos):
+            self.sfx.play("menu_click")
             cur = self.graphics_settings["resolution"]
             if cur in self.available_resolutions:
                 idx = (self.available_resolutions.index(cur) + 1) % len(self.available_resolutions)
             else:
                 idx = 0
             self.change_resolution(self.available_resolutions[idx])
+            save_needed = True
         elif R.get("fullscreen") and R["fullscreen"].collidepoint(pos):
+            self.sfx.play("menu_click")
             self._toggle_fullscreen()
+            save_needed = True
         elif R.get("vsync") and R["vsync"].collidepoint(pos):
+            self.sfx.play("menu_click")
             self.graphics_settings["vsync"] = not self.graphics_settings["vsync"]
+            save_needed = True
         elif R.get("scale_down") and R["scale_down"].collidepoint(pos):
+            self.sfx.play("menu_click")
             idx = self.available_ui_scales.index(self.graphics_settings["ui_scale"])
             self.graphics_settings["ui_scale"] = self.available_ui_scales[(idx - 1) % len(self.available_ui_scales)]
             self.apply_ui_scale()
+            save_needed = True
         elif R.get("scale_up") and R["scale_up"].collidepoint(pos):
+            self.sfx.play("menu_click")
             idx = self.available_ui_scales.index(self.graphics_settings["ui_scale"])
             self.graphics_settings["ui_scale"] = self.available_ui_scales[(idx + 1) % len(self.available_ui_scales)]
             self.apply_ui_scale()
+            save_needed = True
+        elif R.get("master_volume_slider") and R["master_volume_slider"].collidepoint(pos):
+            self.sound_slider_dragging = True
+            self._set_master_volume_from_slider_x(pos[0])
+            save_needed = True
+        elif R.get("save_now") and R["save_now"].collidepoint(pos):
+            self.sfx.play("menu_click")
+            if self.save_game():
+                self.save_status_message = "Save OK"
+                self.save_status_timer = 180
+        elif R.get("export_zip") and R["export_zip"].collidepoint(pos):
+            self.sfx.play("menu_click")
+            self.export_save_zip()
+        elif R.get("import_zip") and R["import_zip"].collidepoint(pos):
+            self.sfx.play("menu_click")
+            self.import_latest_save_zip()
         # Back
         if R.get("back") and R["back"].collidepoint(pos):
+            self.sfx.play("menu_click")
+            self.sound_slider_dragging = False
             self.state = GameState.MENU
+
+        if save_needed and self.current_nickname:
+            self.save_game()
     
     def handle_play_click(self, pos):
         """Zpracuje klik v play menu"""
@@ -606,9 +1437,13 @@ class Game:
             if button.is_clicked(pos):
                 if level_num <= self.unlocked_levels:
                     try:
+                        self.sfx.play("menu_click")
                         self.current_level = level_num
                         self.game_won = False
                         self.level_completed = False
+                        self.current_level_elapsed_snapshot = None
+                        self.current_level_start_ticks = pygame.time.get_ticks()
+                        self.level_attempt_mistakes[level_num] = 0
                         self.current_game = self.create_game_level(level_num)
                         if self.current_game is not None:
                             self.state = GameState.GAME
@@ -621,6 +1456,7 @@ class Game:
                 return
         
         if self.play_buttons["back"].is_clicked(pos):
+            self.sfx.play("menu_click")
             self.state = GameState.MENU
     
     def handle_popup_click(self, pos):
@@ -629,9 +1465,12 @@ class Game:
             self.completed_levels.add(self.current_level)
         
         if self.popup_buttons["menu"].is_clicked(pos):
+            self.sfx.play("menu_click")
             self.state = GameState.PLAYING
         elif self.popup_buttons["restart"].is_clicked(pos):
             try:
+                self.current_level_elapsed_snapshot = None
+                self.current_level_start_ticks = pygame.time.get_ticks()
                 self.current_game = self.create_game_level(self.current_level)
                 self.level_completed = False
                 self.game_won = False
@@ -640,8 +1479,12 @@ class Game:
                 self.state = GameState.PLAYING
         elif self.game_won and self.current_level < 20 and self.popup_buttons["next"].is_clicked(pos):
             if self.current_level < 20:
+                self.sfx.play("menu_click")
                 self.current_level += 1
                 try:
+                    self.current_level_elapsed_snapshot = None
+                    self.current_level_start_ticks = pygame.time.get_ticks()
+                    self.level_attempt_mistakes[self.current_level] = 0
                     self.current_game = self.create_game_level(self.current_level)
                     self.level_completed = False
                     self.game_won = False
@@ -652,9 +1495,12 @@ class Game:
     def handle_pause_click(self, pos):
         """Zpracuje klik v pause menu"""
         if self.pause_buttons["continue"].is_clicked(pos):
+            self.sfx.play("pause_toggle")
             self.pause_menu_open = False
         elif self.pause_buttons["restart"].is_clicked(pos):
             try:
+                self.current_level_elapsed_snapshot = None
+                self.current_level_start_ticks = pygame.time.get_ticks()
                 self.current_game = self.create_game_level(self.current_level)
                 self.level_completed = False
                 self.game_won = False
@@ -664,13 +1510,14 @@ class Game:
                 self.state = GameState.PLAYING
                 self.pause_menu_open = False
         elif self.pause_buttons["exit"].is_clicked(pos):
+            self.sfx.play("menu_click")
             self.state = GameState.PLAYING
             self.pause_menu_open = False
     
     def create_game_level(self, level_num):
         """Vytvoří hru pro daný level s detailním error handlingem"""
         if level_num < 1 or level_num > 20:
-            print(f"❌ [ERROR] Level {level_num} neexistuje! Dostupné: 1-20")
+            print(f"[ERROR] Level {level_num} neexistuje! Dostupné: 1-20")
             return None
         
         game_creators = [
@@ -702,27 +1549,32 @@ class Game:
         
         try:
             game_name, game_creator = game_creators[level_num - 1]
-            print(f"🎮 [INFO] Inicializuji level {level_num}: {game_name}...")
+            print(f"[INFO] Inicializuji level {level_num}: {game_name}...")
             
             game_instance = game_creator()
             
             if game_instance is None:
-                print(f"❌ [ERROR] Level {level_num} ({game_name}) vrátil None!")
+                print(f"[ERROR] Level {level_num} ({game_name}) vrátil None!")
                 return None
+
+            game_instance.sfx = self.sfx
+            self.current_level_elapsed_snapshot = None
+            self.current_level_start_ticks = pygame.time.get_ticks()
             
-            print(f"✅ [SUCCESS] Level {level_num} ({game_name}) úspěšně načten!")
+            print(f"[SUCCESS] Level {level_num} ({game_name}) úspěšně načten!")
+            self.sfx.play("level_start")
             return game_instance
             
         except IndexError:
-            print(f"❌ [ERROR] IndexError - Level {level_num} není v seznamu!")
+            print(f"[ERROR] IndexError - Level {level_num} není v seznamu!")
             return None
         except TypeError as e:
-            print(f"❌ [ERROR] TypeError v konstruktoru levelu {level_num}: {e}")
+            print(f"[ERROR] TypeError v konstruktoru levelu {level_num}: {e}")
             import traceback
             traceback.print_exc()
             return None
         except Exception as e:
-            print(f"❌ [CRASH] Neznámá chyba při vytváření levelu {level_num}: {e}")
+            print(f"[CRASH] Neznámá chyba při vytváření levelu {level_num}: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -736,7 +1588,14 @@ class Game:
                 self.running = False
             
             if event.type == pygame.MOUSEMOTION:
+                if self.state == GameState.SETTINGS and self.settings_tab == "sound" and self.sound_slider_dragging:
+                    self._set_master_volume_from_slider_x(mouse_pos[0])
+                for button in self.login_buttons.values():
+                    button.is_hovered(mouse_pos)
                 for button in self.menu_buttons.values():
+                    button.is_hovered(mouse_pos)
+                self.achievements_button.is_hovered(mouse_pos)
+                for button in self.theme_buttons.values():
                     button.is_hovered(mouse_pos)
                 for button in self.patch_buttons.values():
                     button.is_hovered(mouse_pos)
@@ -748,18 +1607,27 @@ class Game:
                     button.is_hovered(mouse_pos)
                 for button in self.pause_buttons.values():
                     button.is_hovered(mouse_pos)
+                for button in self.achievements_buttons.values():
+                    button.is_hovered(mouse_pos)
             
             if event.type == pygame.MOUSEBUTTONDOWN:
-                if self.state == GameState.MENU:
+                if self.state == GameState.LOGIN:
+                    self.handle_login_click(mouse_pos)
+                elif self.state == GameState.MENU:
                     self.handle_menu_click(mouse_pos)
                 elif self.state == GameState.PATCH_NOTES:
                     self.handle_patch_click(mouse_pos)
                 elif self.state == GameState.SETTINGS:
                     self.handle_settings_click(mouse_pos)
+                elif self.state == GameState.ACHIEVEMENTS:
+                    self.handle_achievements_click(mouse_pos)
+                elif self.state == GameState.THEMES:
+                    self.handle_themes_click(mouse_pos)
                 elif self.state == GameState.PLAYING:
                     self.handle_play_click(mouse_pos)
                 elif self.state == GameState.GAME:
                     if self.show_hint_popup:
+                        self.sfx.play("menu_click")
                         self.show_hint_popup = False
                     elif self.pause_menu_open:
                         self.handle_pause_click(mouse_pos)
@@ -767,19 +1635,39 @@ class Game:
                         self.handle_popup_click(mouse_pos)
                     elif self.current_game:
                         self.current_game.handle_event(event)
+
+            if event.type == pygame.MOUSEBUTTONUP:
+                self.sound_slider_dragging = False
             
             elif event.type == pygame.KEYDOWN:
+                if self.state == GameState.LOGIN:
+                    if event.key == pygame.K_RETURN:
+                        self.login_or_create_save(self.login_nickname_input)
+                    elif event.key == pygame.K_BACKSPACE:
+                        self.login_nickname_input = self.login_nickname_input[:-1]
+                    elif event.unicode:
+                        if len(self.login_nickname_input) < 20 and re.fullmatch(r"[A-Za-z0-9_\-]", event.unicode):
+                            self.login_nickname_input += event.unicode
+                    continue
+
                 if event.key == pygame.K_o:
                     self.admin_mode = not self.admin_mode
                     if self.admin_mode:
                         self.unlocked_levels = 20
                     else:
                         self.unlocked_levels = 1
-                if self.state == GameState.GAME:
-                    if event.key == pygame.K_ESCAPE:
+                if event.key == pygame.K_ESCAPE:
+                    if self.state in (GameState.PATCH_NOTES, GameState.SETTINGS, GameState.PLAYING, GameState.ACHIEVEMENTS, GameState.THEMES):
+                        self.sfx.play("menu_click")
+                        self.state = GameState.MENU
+                    elif self.state == GameState.GAME:
                         if not self.level_completed:
+                            self.sfx.play("pause_toggle")
                             self.pause_menu_open = not self.pause_menu_open
-                    elif event.key == pygame.K_SPACE:
+                if event.key == pygame.K_F11:
+                    self._toggle_fullscreen()
+                if self.state == GameState.GAME:
+                    if event.key == pygame.K_SPACE:
                         self.space_press_count += 1
                         self.space_press_timer = 15
                         if self.space_press_count >= 2 and not self.level_completed and not self.pause_menu_open:
@@ -791,16 +1679,97 @@ class Game:
     
     def update(self):
         """Aktualizuje stav hry"""
+        if self.win_anim_timer > 0:
+            self.win_anim_timer -= 1
+            for p in self.win_anim_particles:
+                p["x"] += p["vx"]
+                p["y"] += p["vy"]
+                p["vy"] += 0.12
+
+        if self.screen_glow_timer > 0:
+            self.screen_glow_timer -= 1
+        if self.screen_shake_timer > 0:
+            self.screen_shake_timer -= 1
+
+        for note in self.achievement_notifications:
+            note["timer"] -= 1
+        self.achievement_notifications = [n for n in self.achievement_notifications if n["timer"] > 0]
+
+        if self.save_status_timer > 0:
+            self.save_status_timer -= 1
+
         if self.state == GameState.GAME and not self.level_completed and self.current_game and not self.pause_menu_open:
             self.current_game.update()
             if self.current_game.is_won():
                 self.level_completed = True
                 self.game_won = True
+                self.sfx.play("level_success")
+                self.sfx.play("level_complete")
+
+                elapsed = 0.0
+                if self.current_level_start_ticks > 0:
+                    elapsed = (pygame.time.get_ticks() - self.current_level_start_ticks) / 1000.0
+                if elapsed > 0:
+                    self.current_level_elapsed_snapshot = elapsed
+
+                reaction_ms = None
+                if hasattr(self.current_game, "reaction_time_ms"):
+                    try:
+                        reaction_ms = int(self.current_game.reaction_time_ms)
+                    except Exception:
+                        reaction_ms = None
+
+                if reaction_ms is not None and reaction_ms > 0:
+                    best_ms = self.level_best_reaction_ms.get(self.current_level)
+                    if best_ms is None or reaction_ms < best_ms:
+                        self.level_best_reaction_ms[self.current_level] = reaction_ms
+                    self.current_level_elapsed_snapshot = reaction_ms / 1000.0
+                elif self.current_level == 2 and elapsed > 0:
+                    reaction_ms = int(elapsed * 1000)
+                    best_ms = self.level_best_reaction_ms.get(2)
+                    if best_ms is None or reaction_ms < best_ms:
+                        self.level_best_reaction_ms[2] = reaction_ms
+                    self.current_level_elapsed_snapshot = reaction_ms / 1000.0
+                elif elapsed > 0:
+                    best = self.level_best_time.get(self.current_level)
+                    if best is None or elapsed < best:
+                        self.level_best_time[self.current_level] = elapsed
+
+                moves = self._get_moves_used()
+                if moves is not None:
+                    best_moves = self.level_best_moves.get(self.current_level)
+                    if best_moves is None or moves < best_moves:
+                        self.level_best_moves[self.current_level] = moves
+
+                stars = self._calculate_stars(self.level_attempt_mistakes[self.current_level])
+                self.level_stars[self.current_level] = max(self.level_stars[self.current_level], stars)
+
+                self._unlock_achievement(f"level_{self.current_level}")
+                if self.current_level == 1:
+                    self._unlock_achievement("record_l1")
+
+                remain = self._get_remaining_seconds()
+                if remain is not None and remain >= 3:
+                    if self.current_level == 1:
+                        self._unlock_achievement("speed_l1")
+                    if self.current_level == 8:
+                        self._unlock_achievement("speed_l8")
+
+                if len(self.completed_levels | {self.current_level}) >= 20:
+                    self._unlock_achievement("all_levels")
+
+                self._start_win_animation()
                 if self.current_level == self.unlocked_levels and self.unlocked_levels < 23:
                     self.unlocked_levels += 1
+                self.save_game()
             elif self.current_game.is_lost():
                 self.level_completed = True
                 self.game_won = False
+                self.sfx.play("level_fail")
+                if self.current_level_start_ticks > 0:
+                    self.current_level_elapsed_snapshot = (pygame.time.get_ticks() - self.current_level_start_ticks) / 1000.0
+                self.level_attempt_mistakes[self.current_level] += 1
+                self.save_game()
         
         if self.hint_popup_timer > 0:
             self.hint_popup_timer -= 1
@@ -814,23 +1783,66 @@ class Game:
     
     def draw(self):
         """Kreslí vše na obrazovku"""
-        if self.state == GameState.MENU:
+        self._apply_theme_to_buttons()
+        if self.state == GameState.LOGIN:
+            self.draw_login()
+        elif self.state == GameState.MENU:
             self.draw_menu()
         elif self.state == GameState.PATCH_NOTES:
             self.draw_patch_notes()
         elif self.state == GameState.SETTINGS:
             self.draw_settings()
+        elif self.state == GameState.ACHIEVEMENTS:
+            self.draw_achievements()
+        elif self.state == GameState.THEMES:
+            self.draw_themes()
         elif self.state == GameState.PLAYING:
             self.draw_play_menu()
         elif self.state == GameState.GAME:
             if self.current_game:
                 self.current_game.draw(self.screen)
-                
-                level_text = FONT_SMALL.render(f"Level: {self.current_level}/20", True, WHITE)
-                self.screen.blit(level_text, (self.screen_width - 200, 10))
-                
-                hint_text = FONT_TINY.render("Napoveda: 2x SPACE | ESC: Menu", True, YELLOW)
-                self.screen.blit(hint_text, (10, 10))
+                s = self._scale()
+                f_hud  = pygame.font.Font(None, max(12, int(32 * s)))
+                f_hint = pygame.font.Font(None, max(12, int(24 * s)))
+                level_text = f_hud.render(f"Level: {self.current_level}/20", True, WHITE)
+                self.screen.blit(level_text, (self.screen_width - int(200*s), int(10*s)))
+                self._draw_progress_bar()
+
+                stars = self.level_stars.get(self.current_level, 0)
+                stars_txt = f_hud.render(f"Stars: {stars}/3", True, YELLOW)
+                self.screen.blit(stars_txt, (self.screen_width - int(200*s), int(64*s)))
+
+                if self.current_level in self.level_best_reaction_ms:
+                    if hasattr(self.current_game, 'reaction_time_ms') and self.current_game.reaction_time_ms > 0:
+                        ct = f_hint.render(f"Current: {self.current_game.reaction_time_ms}ms", True, WHITE)
+                        self.screen.blit(ct, (self.screen_width - int(220*s), int(92*s)))
+                    elif self.current_level == 2:
+                        cur_elapsed = self._get_current_elapsed_seconds()
+                        if cur_elapsed is not None:
+                            ct = f_hint.render(f"Current: {int(cur_elapsed * 1000)}ms", True, WHITE)
+                            self.screen.blit(ct, (self.screen_width - int(220*s), int(92*s)))
+                    bt = f_hint.render(f"Best: {self.level_best_reaction_ms[self.current_level]}ms", True, CYAN)
+                    self.screen.blit(bt, (self.screen_width - int(220*s), int(114*s)))
+                elif self.current_level == 2 and self.current_level in self.level_best_time:
+                    cur_elapsed = self._get_current_elapsed_seconds()
+                    if cur_elapsed is not None:
+                        ct = f_hint.render(f"Current: {int(cur_elapsed * 1000)}ms", True, WHITE)
+                        self.screen.blit(ct, (self.screen_width - int(220*s), int(92*s)))
+                    bt = f_hint.render(f"Best: {int(self.level_best_time[self.current_level] * 1000)}ms", True, CYAN)
+                    self.screen.blit(bt, (self.screen_width - int(220*s), int(114*s)))
+                elif self.current_level in self.level_best_time:
+                    cur_elapsed = self._get_current_elapsed_seconds()
+                    if cur_elapsed is not None:
+                        ct = f_hint.render(f"Current: {cur_elapsed:.2f}s", True, WHITE)
+                        self.screen.blit(ct, (self.screen_width - int(220*s), int(92*s)))
+                    bt = f_hint.render(f"Best: {self.level_best_time[self.current_level]:.2f}s", True, CYAN)
+                    self.screen.blit(bt, (self.screen_width - int(220*s), int(114*s)))
+                elif self.current_level in self.level_best_moves:
+                    bm = f_hint.render(f"Best moves: {self.level_best_moves[self.current_level]}", True, CYAN)
+                    self.screen.blit(bm, (self.screen_width - int(220*s), int(92*s)))
+
+                hint_text = f_hint.render("Napoveda: 2x SPACE | ESC: Menu", True, YELLOW)
+                self.screen.blit(hint_text, (int(10*s), int(10*s)))
                 
                 if self.show_hint_popup:
                     self.draw_hint_popup()
@@ -840,6 +1852,26 @@ class Game:
                 
                 if self.level_completed:
                     self.draw_popup_menu()
+
+                if self.win_anim_timer > 0 and self.game_won:
+                    for p in self.win_anim_particles:
+                        pygame.draw.circle(self.screen, p["col"], (int(p["x"]), int(p["y"])), p["size"])
+
+                if self.screen_shake_timer > 0:
+                    dx = random.randint(-3, 3)
+                    dy = random.randint(-3, 3)
+                    shaken = self.screen.copy()
+                    self.screen.fill(BLACK)
+                    self.screen.blit(shaken, (dx, dy))
+
+                if self.screen_glow_timer > 0:
+                    alpha = int(120 * (self.screen_glow_timer / 24.0))
+                    glow = pygame.Surface((self.screen_width, self.screen_height), pygame.SRCALPHA)
+                    ac = self._tc("accent")
+                    glow.fill((ac[0], ac[1], ac[2], alpha))
+                    self.screen.blit(glow, (0, 0))
+
+        self._draw_achievement_notifications()
         
         pygame.display.flip()
     
@@ -1084,23 +2116,32 @@ class SimonSays(BaseGame):
         self.sequence_delay = 0
         self.circle_radius = 75
     
+    def _circle_positions(self, screen_w, screen_h):
+        s = min(screen_w / 1920, screen_h / 1080)
+        gap = int(100 * s)
+        cy_center = screen_h // 2 - int(30 * s)
+        self.circle_radius = max(30, int(75 * s))
+        return [
+            (screen_w//2 - gap, cy_center - gap),
+            (screen_w//2 + gap, cy_center - gap),
+            (screen_w//2 - gap, cy_center + gap),
+            (screen_w//2 + gap, cy_center + gap),
+        ]
+
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN and self.waiting_for_input:
             pos = event.pos
             screen_w = SCREEN_WIDTH
             screen_h = SCREEN_HEIGHT
-            circle_positions = [
-                (screen_w//2 - 100, screen_h//2 - 100),
-                (screen_w//2 + 100, screen_h//2 - 100),
-                (screen_w//2 - 100, screen_h//2 + 100),
-                (screen_w//2 + 100, screen_h//2 + 100),
-            ]
+            circle_positions = self._circle_positions(screen_w, screen_h)
             for i, (cx, cy) in enumerate(circle_positions):
                 dist = ((pos[0] - cx)**2 + (pos[1] - cy)**2)**0.5
                 if dist <= self.circle_radius:
                     self.player_sequence.append(i)
                     self.lights_on[i] = True
                     self.light_timer = 15
+                    if hasattr(self, "sfx"):
+                        self.sfx.play("level_action")
                     self.check_sequence()
                     break
     
@@ -1118,7 +2159,10 @@ class SimonSays(BaseGame):
     
     def play_sequence(self):
         if self.current_step < len(self.sequence):
-            self.lights_on[self.sequence[self.current_step]] = True
+            light_idx = self.sequence[self.current_step]
+            self.lights_on[light_idx] = True
+            if hasattr(self, "sfx"):
+                self.sfx.play("simon_flash")
             # Zrychluj i délku osvětlení
             self.light_timer = max(15, 30 - (len(self.sequence) // 2))
             self.current_step += 1
@@ -1155,46 +2199,48 @@ class SimonSays(BaseGame):
     def draw(self, screen):
         screen.fill(DARK_BLUE)
         
-        # Získej aktuální rozlišení
         screen_w = screen.get_width()
         screen_h = screen.get_height()
+        s = min(screen_w / 1920, screen_h / 1080)
         
-        title = FONT_LARGE.render("SIMON SAYS", True, CYAN)
-        screen.blit(title, (screen_w//2 - 150, 30))
+        f_title = pygame.font.Font(None, max(20, int(80 * s)))
+        f_info  = pygame.font.Font(None, max(14, int(50 * s)))
+        f_small = pygame.font.Font(None, max(12, int(32 * s)))
         
-        # Pozice koleček (dynamicky podle rozlišení)
-        circle_positions = [
-            (screen_w//2 - 100, screen_h//2 - 100),  # Levé horní
-            (screen_w//2 + 100, screen_h//2 - 100),  # Pravé horní
-            (screen_w//2 - 100, screen_h//2 + 100),  # Levé dolní
-            (screen_w//2 + 100, screen_h//2 + 100),  # Pravé dolní
-        ]
+        title = f_title.render("SIMON SAYS", True, CYAN)
+        screen.blit(title, title.get_rect(center=(screen_w//2, int(60*s))))
         
-        # Nakresli 4 barevná kolečka
+        # Circles centred vertically, offset upward a bit to leave room for text below
+        circle_positions = self._circle_positions(screen_w, screen_h)
+        gap = int(100 * s)
+        r = self.circle_radius
+        cy_center = screen_h // 2 - int(30 * s)
+        
         for i in range(4):
             cx, cy = circle_positions[i]
             color = self.colors[i] if not self.lights_on[i] else (255, 255, 255)
-            pygame.draw.circle(screen, color, (cx, cy), self.circle_radius)
-            # Přidej outline pro lepší viditelnost
-            pygame.draw.circle(screen, WHITE, (cx, cy), self.circle_radius, 3)
+            pygame.draw.circle(screen, color, (cx, cy), r)
+            pygame.draw.circle(screen, WHITE, (cx, cy), r, 3)
         
-        # Info s pokrokem
-        info = FONT_MEDIUM.render(f"Kolo: {self.round}/8 | Délka: {len(self.sequence)}", True, YELLOW)
-        screen.blit(info, (screen_w//2 - 250, 550))
+        # Text below circles
+        text_y = cy_center + gap + r + int(30 * s)
+        line_gap = int(40 * s)
         
-        # Zobraz pokrok v sekvenci
-        progress = FONT_SMALL.render(f"Tvá řada: {len(self.player_sequence)}/{len(self.sequence)}", True, CYAN)
-        screen.blit(progress, (screen_w//2 - 200, 600))
+        info = f_info.render(f"Kolo: {self.round}/8 | Délka: {len(self.sequence)}", True, YELLOW)
+        screen.blit(info, info.get_rect(center=(screen_w//2, text_y)))
+        
+        progress = f_small.render(f"Tvá řada: {len(self.player_sequence)}/{len(self.sequence)}", True, CYAN)
+        screen.blit(progress, progress.get_rect(center=(screen_w//2, text_y + line_gap)))
         
         if self.waiting_for_input:
-            instr = FONT_SMALL.render("Tvůj tah! Klikej na světla", True, GREEN)
+            instr = f_small.render("Tvůj tah! Klikej na světla", True, GREEN)
         else:
-            instr = FONT_SMALL.render("Sleduj sekvenci...", True, WHITE)
-        screen.blit(instr, (screen_w//2 - 200, 650))
+            instr = f_small.render("Sleduj sekvenci...", True, WHITE)
+        screen.blit(instr, instr.get_rect(center=(screen_w//2, text_y + 2 * line_gap)))
         
         if self.lost:
-            lose = FONT_LARGE.render("ŠPATNĚ!", True, RED)
-            screen.blit(lose, (screen_w//2 - 150, 700))
+            lose = f_title.render("ŠPATNĚ!", True, RED)
+            screen.blit(lose, lose.get_rect(center=(screen_w//2, text_y + 3 * line_gap)))
     
     def get_hint(self):
         return "Zapamatuj si pořadí barev!"
@@ -2224,14 +3270,12 @@ class WordUnscrambler(BaseGame):
             ("STŮL", "LŮST"),
             ("KNIHA", "NHKIA"),
             ("BARVA", "VARBA"),
-            ("LÉTO", "TOLE"),
-            ("TRÁVA", "VAART"),
+            ("TRÁVA", "VAÁRT"),
             ("CHLEB", "LHCBE"),
             ("VODA", "ADOV"),
             ("VÍTR", "RÍTV"),
             ("SLOVO", "VOSLO"),
             ("MRAKY", "YAMRK"),
-            ("SLANÝ", "NASŁY"),
         ]
         
         self.current_pair = random.choice(self.word_pairs)
@@ -2623,45 +3667,126 @@ class PatternFollow(BaseGame):
 
 
 class NumberSort(BaseGame):
-    """Seřaď čísla od nejmenšího k největšímu"""
+    """Seřaď rovnice podle výsledků od nejmenšího k největšímu"""
+
     def __init__(self):
         super().__init__()
-        self.numbers = random.sample(range(1, 101), 5)
+        self._generate_equations()
+
+    @staticmethod
+    def _make_equation(answer):
+        """Return (equation_string, answer) for a given integer answer."""
+        kind = random.randint(0, 5)
+        if kind == 0:
+            c = random.randint(2, 6)
+            return f"{c}x = {c * answer}", answer
+        elif kind == 1:
+            b = random.randint(3, 30)
+            return f"x + {b} = {answer + b}", answer
+        elif kind == 2:
+            b = random.randint(2, min(answer - 1, 25)) if answer > 2 else 1
+            return f"x - {b} = {answer - b}", answer
+        elif kind == 3:
+            c = random.choice([2, 3, 4, 5])
+            return f"x / {c} = {answer // c}" if answer % c == 0 else f"x + {c} = {answer + c}", answer
+        elif kind == 4:
+            b = random.randint(1, 15)
+            return f"2x + {b} = {2 * answer + b}", answer
+        else:
+            b = random.randint(1, 12)
+            return f"3x - {b} = {3 * answer - b}", answer
+
+    def _generate_equations(self):
+        """Generate 4 equations with unique integer answers in [3..95]."""
+        answers = random.sample(range(3, 96), 4)
+        self.equations = [self._make_equation(a) for a in answers]
+        random.shuffle(self.equations)
+        self.answers = [ans for _, ans in self.equations]
+        self.sorted_correct = sorted(self.answers)
         self.player_order = []
-        self.sorted_correct = sorted(self.numbers)
-    
+        self.clicked_indices = set()
+
     def handle_event(self, event):
         if event.type == pygame.MOUSEBUTTONDOWN:
+            sw = pygame.display.get_surface().get_width()
+            sh = pygame.display.get_surface().get_height()
+            s = min(sw / 1920, sh / 1080)
             pos = event.pos
-            for i, num in enumerate(self.numbers):
-                x = 250 + i * 250
-                y = 400
-                if pygame.Rect(x, y, 150, 100).collidepoint(pos):
-                    if num not in self.player_order:
-                        self.player_order.append(num)
-                        if self.player_order == self.sorted_correct:
-                            self.won = True
+            cols = 4
+            btn_w = int(280 * s)
+            btn_h = int(90 * s)
+            gap_x = int(300 * s)
+            gap_y = int(120 * s)
+            total_w = cols * gap_x - (gap_x - btn_w)
+            start_x = (sw - total_w) // 2
+            start_y = int(280 * s)
+            for i in range(len(self.equations)):
+                col = i % cols
+                row = i // cols
+                x = start_x + col * gap_x
+                y = start_y + row * gap_y
+                if pygame.Rect(x, y, btn_w, btn_h).collidepoint(pos):
+                    if i not in self.clicked_indices:
+                        ans = self.answers[i]
+                        self.player_order.append(ans)
+                        self.clicked_indices.add(i)
+                        if len(self.player_order) == len(self.answers):
+                            if self.player_order == self.sorted_correct:
+                                self.won = True
+                            else:
+                                self.lost = True
                     break
-    
+
     def draw(self, screen):
+        sw, sh = screen.get_size()
+        s = min(sw / 1920, sh / 1080)
         screen.fill(DARK_BLUE)
-        title = FONT_LARGE.render("SEŘAĎ ČÍSLA", True, CYAN)
-        screen.blit(title, (SCREEN_WIDTH//2 - 150, 30))
-        
-        for i, num in enumerate(self.numbers):
-            x = 250 + i * 250
-            y = 400
-            pygame.draw.rect(screen, BLUE, pygame.Rect(x, y, 150, 100))
-            text = FONT_LARGE.render(str(num), True, WHITE)
-            screen.blit(text, (x + 40, y + 20))
-            pygame.draw.rect(screen, WHITE, pygame.Rect(x, y, 150, 100), 3)
-        
-        result = " < ".join(str(n) for n in self.player_order) if self.player_order else "?"
-        result_text = FONT_SMALL.render(f"Tvůj výběr: {result}", True, YELLOW)
-        screen.blit(result_text, (SCREEN_WIDTH//2 - 300, 650))
-    
+
+        f_title = pygame.font.Font(None, max(20, int(72 * s)))
+        f_eq    = pygame.font.Font(None, max(14, int(36 * s)))
+        f_info  = pygame.font.Font(None, max(12, int(30 * s)))
+
+        title = f_title.render("SEŘAĎ ROVNICE", True, CYAN)
+        screen.blit(title, title.get_rect(center=(sw // 2, int(50 * s))))
+
+        sub = f_info.render("Vyřeš rovnice a klikej od nejmenšího výsledku k největšímu", True, (200, 200, 255))
+        screen.blit(sub, sub.get_rect(center=(sw // 2, int(110 * s))))
+
+        cols = 4
+        btn_w = int(280 * s)
+        btn_h = int(90 * s)
+        gap_x = int(300 * s)
+        gap_y = int(120 * s)
+        total_w = cols * gap_x - (gap_x - btn_w)
+        start_x = (sw - total_w) // 2
+        start_y = int(280 * s)
+
+        for i, (eq_str, ans) in enumerate(self.equations):
+            col = i % cols
+            row = i // cols
+            x = start_x + col * gap_x
+            y = start_y + row * gap_y
+            rect = pygame.Rect(x, y, btn_w, btn_h)
+            if i in self.clicked_indices:
+                pygame.draw.rect(screen, (40, 40, 60), rect)
+                pygame.draw.rect(screen, GRAY, rect, 2)
+                t = f_eq.render(f"{eq_str}  [{ans}]", True, GRAY)
+            else:
+                pygame.draw.rect(screen, BLUE, rect)
+                pygame.draw.rect(screen, WHITE, rect, 3)
+                t = f_eq.render(eq_str, True, WHITE)
+            screen.blit(t, t.get_rect(center=rect.center))
+
+        # Player selection
+        if self.player_order:
+            result = " < ".join(str(n) for n in self.player_order)
+        else:
+            result = "?"
+        rt = f_info.render(f"Tvůj výběr: {result}", True, YELLOW)
+        screen.blit(rt, rt.get_rect(center=(sw // 2, sh - int(80 * s))))
+
     def get_hint(self):
-        return f"Správné pořadí: {' < '.join(str(n) for n in self.sorted_correct)}"
+        return f"Správné pořadí výsledků: {' < '.join(str(n) for n in self.sorted_correct)}"
 
 
 class ReactionTime(BaseGame):
@@ -2722,10 +3847,10 @@ class ReactionTime(BaseGame):
                 screen.blit(time_text, (SCREEN_WIDTH//2 - 150, 280))
                 
                 if self.reaction_time_ms < self.target_time:
-                    result = FONT_MEDIUM.render("VYHRAL! ✓", True, GREEN)
+                    result = FONT_MEDIUM.render("VYHRAL!", True, GREEN)
                     diff = FONT_SMALL.render(f"{self.target_time - self.reaction_time_ms}ms lepší", True, GREEN)
                 else:
-                    result = FONT_MEDIUM.render("PROHRA! ✗", True, RED)
+                    result = FONT_MEDIUM.render("PROHRA!", True, RED)
                     diff = FONT_SMALL.render(f"{self.reaction_time_ms - self.target_time}ms horší", True, RED)
                 
                 screen.blit(result, (SCREEN_WIDTH//2 - 120, 450))
@@ -2746,26 +3871,26 @@ class Hangman(BaseGame):
             "SPORTS": ["TENNIS", "HOCKEY", "SOCCER", "BOXING", "SWIMMING"]
         }
         self.riddles = {
-            "DOG": "Domesticated 15,000 years ago from wolves, this loyal companion can learn hundreds of words and sniff out diseases.",
-            "CAT": "Worshipped as gods in ancient Egypt, these silent hunters spend 70% of their lives sleeping.",
-            "BIRD": "The only living descendants of dinosaurs, some species can fly backwards while others swim but never take flight.",
-            "HORSE": "Alexander the Great's Bucephalus was one; they sleep standing up and can run within hours of birth.",
-            "ELEPHANT": "Earth's largest land mammal, it mourns its dead, fears bees, and its tusks are actually overgrown teeth.",
-            "PIZZA": "A dish that traveled from Naples to conquer the world, the Margherita variety was named after an Italian queen in 1889.",
-            "BREAD": "One of humanity's oldest prepared foods dating back 14,000 years, ancient Egyptians used it as currency.",
-            "CHEESE": "Accidentally discovered when milk was stored in animal stomachs, some aged varieties are legally alive with mites.",
-            "APPLE": "Newton allegedly discovered gravity thanks to one; its seeds contain a compound that converts to cyanide.",
-            "CHICKEN": "Descended from the jungle fowl of Southeast Asia, it outnumbers humans 3 to 1 on Earth.",
-            "FRANCE": "Home to a tower once hated by locals, a louvre that was a fortress, and the world's most visited country.",
-            "GERMANY": "A European nation central to both World Wars, famous for engineering, autobahns with no speed limit, and Oktoberfest.",
-            "JAPAN": "An island nation with more vending machines per capita than any other, where trains apologize for being seconds late.",
-            "BRAZIL": "Named after a tree, it hosts the world's largest carnival and contains 60% of the Amazon rainforest.",
-            "CANADA": "The world's second-largest country by area, it has more lakes than the rest of the world combined.",
-            "TENNIS": "A sport where 'love' means zero, originally played with bare hands in French monasteries.",
-            "HOCKEY": "A sport played on frozen water where a vulcanized rubber disc can travel over 170 km/h.",
-            "SOCCER": "The world's most popular sport; its biggest tournament was once decided by a 'Hand of God' goal.",
-            "BOXING": "Known as 'the sweet science', ancient Greeks wrapped their fists in leather strips to compete at Olympia.",
-            "SWIMMING": "Benjamin Franklin invented flippers for it; humans are the only primates that naturally enjoy doing it."
+            "DOG": "Domestikovaný před 15 000 lety z vlků, tento věrný společník se dokáže naučit stovky slov a dokáže vycítit nemoci.",
+            "CAT": "Uctíváni jako bohové ve starověkém Egyptě, tito tichí lovci tráví 70 % svého života spánkem.",
+            "BIRD": "Jediní žijící potomci dinosaurů, některé druhy dokážou létat pozpátku, jiné plavou, ale nikdy nelétají.",
+            "HORSE": "Bucephalus Alexandra Velikého byl jeden z nich; spí ve stoje a mohou běžet už pár hodin po narození.",
+            "ELEPHANT": "Největší suchozemský savec na Zemi, oplakává své mrtvé, bojí se včel a jeho kly jsou vlastně přerostlé zuby.",
+            "PIZZA": "Pokrm, který se z Neapole rozšířil po celém světě, odrůda Margherita byla pojmenována po italské královně v roce 1889.",
+            "BREAD": "Jeden z nejstarších připravených lidských pokrmů sahající 14 000 let zpět, starověcí Egypťané jej používali jako měnu.",
+            "CHEESE": "Náhodně objeveno, když se mléko skladovalo v žaludcích zvířat; některé zrající druhy jsou legálně považovány za živé kvůli roztočům.",
+            "APPLE": "Newton údajně objevil gravitaci díky jablku; jeho semena obsahují sloučeninu, která se mění na kyanid.",
+            "CHICKEN": "Pochází z kohouta lesního jihovýchodní Asie, na Zemi jich je třikrát více než lidí.",
+            "FRANCE": "Domov věže, kterou místní kdysi nenáviděli, Louvru, který byl pevností, a nejnavštěvovanější země světa.",
+            "GERMANY": "Evropská země centrální pro obě světové války, známá inženýrstvím, dálnicemi bez omezení rychlosti a Oktoberfestem.",
+            "JAPAN": "Ostrovní stát s největším počtem automatů na obyvatele, kde se vlaky omlouvají, i když mají zpoždění jen několik sekund.",
+            "BRAZIL": "Pojmenována podle stromu, hostí největší karneval na světě a obsahuje 60 % amazonského deštného pralesa.",
+            "CANADA": "Druhá největší země světa podle rozlohy, má více jezer než zbytek světa dohromady.",
+            "TENNIS": "Sport, kde 'love' znamená nula, původně se hrál holýma rukama v francouzských klášterech.",
+            "HOCKEY": "Sport hraný na zamrzlé vodě, kde vulkanizovaný gumový kotouč může letět rychlostí přes 170 km/h.",
+            "SOCCER": "Nejoblíbenější sport na světě; jeho největší turnaj byl kdysi rozhodnut gólem zvaným 'Ruka Boží'.",
+            "BOXING": "Známý jako 'sladká věda', staří Řekové si na Olympia omotávali pěsti koženými pásky, aby soutěžili.",
+            "SWIMMING": "Benjamin Franklin vynalezl ploutve pro plavání; lidé jsou jediní primáti, kteří si ho přirozeně užívají."
         }
         self.category = random.choice(list(self.categories.keys()))
         self.word = random.choice(self.categories[self.category])
@@ -2850,7 +3975,7 @@ class Hangman(BaseGame):
             screen.blit(lost_text, (SCREEN_WIDTH//2 - 300, 650))
     
     def get_hint(self):
-        return f"Slovo: {self.word}"
+        return self.riddle if self.riddle else "No hint available."
 
 
 class ColorBlind(BaseGame):
@@ -3097,381 +4222,494 @@ class PipeConnect(BaseGame):
 
 
 class TimeBomb(BaseGame):
-    """Časová bomba - přeřízni správný kabel pro deaktivaci"""
+    """Časová Bomba – Explosive Puzzle.  3-6 kabelů s barvou + vzorem,
+    displej ukazuje kód, manuál s pravidly.  Falešné kabely zrychlí čas."""
+
+    # Barvy kabelů
+    CABLE_COLORS = [
+        ("červená", (220, 30, 30)),
+        ("modrá",   (30, 100, 220)),
+        ("žlutá",   (230, 220, 30)),
+        ("zelená",  (30, 180, 50)),
+        ("černá",   (40, 40, 40)),
+        ("bílá",    (230, 230, 230)),
+    ]
+    # Vzory
+    PATTERNS = ["pruhy", "tečky", "spirála", "rovná"]
+    # Kódy displeje
+    DISPLAY_CODES = list("ABCDEFGH") + list("12345678")
+
     def __init__(self):
         super().__init__()
-        self.cables = [
-            {"color": RED, "correct": False},
-            {"color": GREEN, "correct": True},
-            {"color": BLUE, "correct": False},
-            {"color": YELLOW, "correct": False}
-        ]
-        random.shuffle(self.cables)
-        self.timer = 600  # 10 sekund
-        self.cut = False
-        self.message = "Vyberte správný kabel!"
-    
-    def handle_event(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN and not self.cut:
-            pos = event.pos
-            for i, cable in enumerate(self.cables):
-                x = 300 + i * 150
-                y = 400
-                if pygame.Rect(x - 30, y - 50, 60, 100).collidepoint(pos):
-                    self.cut = True
-                    if cable["correct"]:
-                        self.won = True
-                        self.message = "Bomba deaktivována! ✓"
-                    else:
-                        self.lost = True
-                        self.message = "VÝBUCH! Špatný kabel! ✗"
+        self.num_cables = random.randint(3, 6)
+        self.cables = self._generate_cables()
+        self.display_code = random.choice(self.DISPLAY_CODES)
+        self.rules, self.correct_index = self._generate_rules()
+        self.timer_max = 60 * FPS  # 60 s
+        self.timer = self.timer_max
+        self.speed_mult = 1.0  # falešný kabel zrychlí
+        self.cut_index = -1
+        self.message = ""
+        self.beep_interval = 60  # framy mezi beepy
+        self.beep_counter = 0
+
+    # ----- generátory -----
+    def _generate_cables(self):
+        cables = []
+        used = set()
+        for _ in range(self.num_cables):
+            while True:
+                ci = random.randint(0, len(self.CABLE_COLORS) - 1)
+                pi = random.randint(0, len(self.PATTERNS) - 1)
+                key = (ci, pi)
+                if key not in used:
+                    used.add(key)
                     break
-    
+            name, rgb = self.CABLE_COLORS[ci]
+            pattern = self.PATTERNS[pi]
+            fake = random.random() < 0.2  # 20 % šance na falešný kabel
+            cables.append({
+                "color_name": name, "color": rgb, "pattern": pattern,
+                "cut": False, "fake": fake,
+            })
+        # zajistit aspoň 1 není falešný
+        if all(c["fake"] for c in cables):
+            cables[random.randint(0, len(cables) - 1)]["fake"] = False
+        return cables
+
+    def _generate_rules(self):
+        """Vytvoří 3-4 pravidla a z nich deterministicky určí správný kabel."""
+        rules = []
+        correct = None
+
+        # Pravidlo 1 – podle kódu na displeji
+        if self.display_code.isalpha():
+            letter = self.display_code
+            target_pattern = random.choice(self.PATTERNS)
+            candidates = [i for i, c in enumerate(self.cables)
+                          if c["pattern"] == target_pattern and not c["fake"]]
+            if candidates:
+                idx = candidates[0]
+                rules.append(f"Pokud displej ukazuje písmeno {letter}, "
+                             f"přestřihni první kabel se vzorem '{target_pattern}'.")
+                correct = idx
+        else:
+            num = int(self.display_code)
+            if num % 2 == 0:
+                candidates = [i for i, c in enumerate(self.cables)
+                              if c["color_name"] == "modrá" and not c["fake"]]
+                if candidates:
+                    rules.append("Pokud je číslo na displeji sudé, "
+                                 "přestřihni první modrý kabel.")
+                    correct = candidates[0]
+                else:
+                    rules.append("Pokud je číslo na displeji sudé a nikde není modrý, "
+                                 "přestřihni poslední kabel.")
+                    non_fake = [i for i, c in enumerate(self.cables) if not c["fake"]]
+                    correct = non_fake[-1] if non_fake else len(self.cables) - 1
+            else:
+                candidates = [i for i, c in enumerate(self.cables)
+                              if c["color_name"] == "červená" and not c["fake"]]
+                if candidates:
+                    rules.append("Pokud je číslo na displeji liché, "
+                                 "přestřihni první červený kabel.")
+                    correct = candidates[0]
+                else:
+                    rules.append("Pokud je číslo liché a není červený, "
+                                 "přestřihni první kabel.")
+                    non_fake = [i for i, c in enumerate(self.cables) if not c["fake"]]
+                    correct = non_fake[0] if non_fake else 0
+
+        # fallback – pokud žádný kandidát
+        if correct is None:
+            non_fake = [i for i, c in enumerate(self.cables) if not c["fake"]]
+            correct = non_fake[0] if non_fake else 0
+            rules.append("Pokud žádné pravidlo neplatí, přestřihni první kabel.")
+
+        # Pravidlo 2 – barva vedle barvy
+        color_names = [c["color_name"] for c in self.cables]
+        if "žlutá" in color_names:
+            yi = color_names.index("žlutá")
+            left_blue = yi > 0 and color_names[yi - 1] == "modrá"
+            right_blue = yi < len(color_names) - 1 and color_names[yi + 1] == "modrá"
+            if left_blue and right_blue:
+                rules.append("Žlutý kabel mezi dvěma modrými – NIKDY ho nestříhej!")
+            else:
+                rules.append("Pokud žlutý kabel NENÍ mezi dvěma modrými, můžeš ho ignorovat.")
+
+        # Pravidlo 3 – počet kabelů určité barvy
+        red_count = sum(1 for c in self.cables if c["color_name"] == "červená")
+        if red_count > 2:
+            rules.append(f"Pozor: {red_count} červené kabely! Nech si je na konec.")
+        elif red_count == 0:
+            rules.append("Žádný červený kabel – buď opatrný s modrými.")
+
+        # Pravidlo 4 – falešné kabely
+        rules.append("Falešné kabely vypadají nevinně, ale zrychlí časovač!")
+
+        return rules, correct
+
+    # ----- events -----
+    def handle_event(self, event):
+        if self.won or self.lost:
+            return
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            pos = event.pos
+            for i in range(self.num_cables):
+                if self.cables[i]["cut"]:
+                    continue
+                rect = self._cable_rect(i)
+                if rect.collidepoint(pos):
+                    self._cut_cable(i)
+                    return
+
+    def _cable_rect(self, i):
+        cable_cx = SCREEN_WIDTH // 3
+        total_w = self.num_cables * 100 + (self.num_cables - 1) * 30
+        start_x = cable_cx - total_w // 2
+        x = start_x + i * 130
+        return pygame.Rect(x, 340, 100, 220)
+
+    def _cut_cable(self, i):
+        self.cables[i]["cut"] = True
+        if self.cables[i]["fake"]:
+            self.speed_mult += 0.5
+            self.message = "Falešný kabel! Časovač se zrychlil!"
+            return
+        if i == self.correct_index:
+            self.won = True
+            self.message = "BOMBA DEAKTIVOVÁNA!"
+        else:
+            self.speed_mult *= 3.0
+            self.message = "Špatný kabel! Čas se zrychlil 3×!"
+
+    # ----- update -----
     def update(self):
-        if not self.cut:
-            self.timer -= 1
-            if self.timer <= 0:
-                self.lost = True
-                self.message = "Čas vypršel! Výbuch! ✗"
-    
+        if self.won or self.lost:
+            return
+        self.timer -= self.speed_mult
+        if self.timer <= 0:
+            self.timer = 0
+            self.lost = True
+            self.message = "Čas vypršel! VÝBUCH!"
+        # beep zrychlování
+        frac = self.timer / self.timer_max
+        self.beep_interval = max(5, int(60 * frac))
+        self.beep_counter += 1
+        if self.beep_counter >= self.beep_interval:
+            self.beep_counter = 0
+            self._beep()
+
+    def _beep(self):
+        try:
+            freq = int(600 + (1 - self.timer / self.timer_max) * 800)
+            dur = 40
+            buf = bytearray(dur * 44100 * 2 // 1000)
+            for s in range(len(buf) // 2):
+                t = s / 44100
+                val = int(16000 * math.sin(2 * math.pi * freq * t))
+                buf[2 * s] = val & 0xFF
+                buf[2 * s + 1] = (val >> 8) & 0xFF
+            snd = pygame.mixer.Sound(buffer=bytes(buf))
+            base_vol = 0.15
+            if hasattr(self, "sfx"):
+                base_vol *= self.sfx.master_volume
+            snd.set_volume(base_vol)
+            snd.play()
+        except Exception:
+            pass
+
+    # ----- draw -----
     def draw(self, screen):
         screen.fill(DARK_BLUE)
-        
-        # Bomba s časovačem
-        title = FONT_LARGE.render("⏱ ČASOVÁ BOMBA ⏱", True, RED if self.timer < 180 else YELLOW)
-        screen.blit(title, (SCREEN_WIDTH//2 - 250, 30))
-        
+
+        # ---- LEFT SIDE: cables + timer ----
+        cable_cx = SCREEN_WIDTH // 3  # centre of left third
+
+        # Nadpis
+        frac = self.timer / self.timer_max
+        title_col = RED if frac < 0.3 else YELLOW
+        title = FONT_LARGE.render("CASOVA BOMBA", True, title_col)
+        screen.blit(title, title.get_rect(centerx=cable_cx, top=15))
+
         # Časovač
-        seconds = max(0, self.timer // 60)
-        timer_text = FONT_LARGE.render(f"{seconds}s", True, RED if seconds < 3 else YELLOW)
-        screen.blit(timer_text, (SCREEN_WIDTH//2 - 80, 150))
-        
+        secs = max(0, self.timer / FPS)
+        t_col = RED if secs < 5 else YELLOW
+        timer_txt = FONT_LARGE.render(f"{secs:.1f}s", True, t_col)
+        screen.blit(timer_txt, timer_txt.get_rect(centerx=cable_cx, top=90))
+
+        # Displej kódu
+        code_rect = pygame.Rect(cable_cx - 60, 160, 120, 60)
+        pygame.draw.rect(screen, (10, 10, 10), code_rect)
+        pygame.draw.rect(screen, CYAN, code_rect, 3)
+        code_txt = FONT_LARGE.render(self.display_code, True, (0, 255, 100))
+        screen.blit(code_txt, code_txt.get_rect(center=code_rect.center))
+        lbl = FONT_TINY.render("KÓD", True, GRAY)
+        screen.blit(lbl, lbl.get_rect(centerx=cable_cx, top=225))
+
         # Kabely
-        for i, cable in enumerate(self.cables):
-            x = 300 + i * 150
-            y = 400
-            
-            # Kreslení kabelu jako svislé čáry
-            pygame.draw.line(screen, cable["color"], (x, y - 50), (x, y + 50), 8)
-            
-            # Kreslení řezu
-            if self.cut:
-                pygame.draw.line(screen, WHITE, (x - 30, y), (x + 30, y), 3)
-            
-            pygame.draw.rect(screen, cable["color"], pygame.Rect(x - 20, y - 40, 40, 30))
-            pygame.draw.rect(screen, WHITE, pygame.Rect(x - 20, y - 40, 40, 30), 2)
-        
+        for i in range(self.num_cables):
+            self._draw_cable(screen, i)
+
         # Zpráva
-        msg_color = GREEN if self.won else RED
-        message = FONT_MEDIUM.render(self.message, True, msg_color)
-        screen.blit(message, (SCREEN_WIDTH//2 - 200, 550))
-        
-        # Instrukce
-        if not self.cut:
-            instr = FONT_SMALL.render("KLIKNI NA SPRÁVNÝ KABEL - váš život závisí na tom!", True, WHITE)
-            screen.blit(instr, (SCREEN_WIDTH//2 - 300, 650))
-    
+        if self.message:
+            mc = GREEN if self.won else RED
+            mt = FONT_MEDIUM.render(self.message, True, mc)
+            screen.blit(mt, mt.get_rect(centerx=cable_cx, top=590))
+
+        # dolní instrukce
+        if not self.won and not self.lost:
+            it = FONT_SMALL.render("Klikni na kabel k přestřihnutí!", True, WHITE)
+            screen.blit(it, it.get_rect(centerx=cable_cx, top=650))
+
+        # Speed indicator
+        if self.speed_mult > 1.0:
+            sp = FONT_TINY.render(f"Rychlost: x{self.speed_mult:.1f}", True, RED)
+            screen.blit(sp, (10, 10))
+
+        # ---- RIGHT SIDE: manual / rules ----
+        manual_x = SCREEN_WIDTH // 2 + 40
+        manual_w = SCREEN_WIDTH // 2 - 80
+        panel = pygame.Rect(manual_x, 15, manual_w, SCREEN_HEIGHT - 30)
+        pygame.draw.rect(screen, (20, 15, 35), panel, border_radius=10)
+        pygame.draw.rect(screen, (100, 80, 40), panel, 3, border_radius=10)
+
+        mt = FONT_MEDIUM.render("MANUAL", True, YELLOW)
+        screen.blit(mt, mt.get_rect(centerx=panel.centerx, top=panel.top + 12))
+
+        # Cable summary
+        cy = panel.top + 60
+        cs = FONT_TINY.render("Kabely:", True, CYAN)
+        screen.blit(cs, (manual_x + 15, cy))
+        cy += 24
+        for i, c in enumerate(self.cables):
+            txt = f"  {i+1}: {c['color_name']} ({c['pattern']})"
+            ct = FONT_TINY.render(txt, True, WHITE)
+            screen.blit(ct, (manual_x + 15, cy))
+            cy += 22
+
+        # Rules
+        cy += 10
+        rl = FONT_TINY.render("Pravidla:", True, CYAN)
+        screen.blit(rl, (manual_x + 15, cy))
+        cy += 26
+        for ri, rule in enumerate(self.rules):
+            rule_col = (255, 200, 100) if ri == 0 else LIGHT_GRAY
+            # word-wrap long rules
+            words = rule.split()
+            line = "• "
+            for w in words:
+                test = line + w + " "
+                tw = FONT_TINY.size(test)[0]
+                if tw > manual_w - 30:
+                    rt = FONT_TINY.render(line, True, rule_col)
+                    screen.blit(rt, (manual_x + 15, cy))
+                    cy += 22
+                    line = "  " + w + " "
+                else:
+                    line = test
+            if line.strip():
+                rt = FONT_TINY.render(line, True, rule_col)
+                screen.blit(rt, (manual_x + 15, cy))
+                cy += 22
+            cy += 4
+
+    def _draw_cable(self, screen, i):
+        rect = self._cable_rect(i)
+        cable = self.cables[i]
+        col = cable["color"]
+
+        if cable["cut"]:
+            # přestřižený – šedý obrys, přeškrtnutý
+            pygame.draw.rect(screen, (50, 50, 50), rect)
+            pygame.draw.rect(screen, GRAY, rect, 2)
+            pygame.draw.line(screen, RED, rect.topleft, rect.bottomright, 4)
+            pygame.draw.line(screen, RED, rect.topright, rect.bottomleft, 4)
+            return
+
+        # pozadí kabelu
+        pygame.draw.rect(screen, col, rect, border_radius=6)
+        pygame.draw.rect(screen, WHITE, rect, 3, border_radius=6)
+
+        # Vzor
+        cx, cy = rect.centerx, rect.centery
+        pat = cable["pattern"]
+        if pat == "pruhy":
+            for dy in range(-60, 70, 20):
+                pygame.draw.line(screen, BLACK, (rect.left + 8, cy + dy),
+                                 (rect.right - 8, cy + dy), 2)
+        elif pat == "tečky":
+            for dx in range(-30, 40, 20):
+                for dy in range(-70, 80, 20):
+                    pygame.draw.circle(screen, BLACK, (cx + dx, cy + dy), 4)
+        elif pat == "spirála":
+            pts = []
+            for a in range(0, 720, 15):
+                r = 5 + a / 60
+                px = cx + r * math.cos(math.radians(a))
+                py = cy + r * math.sin(math.radians(a))
+                pts.append((int(px), int(py)))
+            if len(pts) > 1:
+                pygame.draw.lines(screen, BLACK, False, pts, 2)
+        else:  # rovná
+            pygame.draw.line(screen, BLACK, (cx, rect.top + 10),
+                             (cx, rect.bottom - 10), 4)
+
+        # Popis barvy a vzoru pod kabelem
+        lbl1 = FONT_TINY.render(cable["color_name"], True, WHITE)
+        lbl2 = FONT_TINY.render(cable["pattern"], True, LIGHT_GRAY)
+        screen.blit(lbl1, lbl1.get_rect(centerx=cx, top=rect.bottom + 4))
+        screen.blit(lbl2, lbl2.get_rect(centerx=cx, top=rect.bottom + 22))
+
     def get_hint(self):
-        correct_idx = next(i for i, c in enumerate(self.cables) if c["correct"])
-        return f"Správný kabel je na {correct_idx + 1}. místě!"
+        c = self.cables[self.correct_index]
+        return (f"Správný kabel je #{self.correct_index + 1}: "
+                f"{c['color_name']}, vzor {c['pattern']}.")
 
 
 class RotatingImage(BaseGame):
-    """
-    Rozpoznej Tvar – Level 11 HARD Edition.
-    3 brutally deceptive rounds.  Pick the ONE exact match among 12 shapes.
-    Round 1: Pentagon 30° rotation (purple)
-    Round 2: Scalene Triangle 60° rotation (orange)
-    Round 3: Isosceles Trapezoid 25° rotation (cyan)
-    Pass: 2/3 correct.  Perfect: 3/3.
-    """
+    """Level 12: rozpoznání tvaru podle názvu bez rotace."""
 
     TOTAL_ROUNDS = 3
-    # time limits per round in frames (60 fps)
-    ROUND_FRAMES = [45 * 60, 50 * 60, 60 * 60]
+    OPTIONS_PER_ROUND = 8
 
-    # colours
-    C_PURPLE = (123, 44, 191)
-    C_ORANGE = (255, 107, 53)
-    C_CYAN   = (0, 217, 255)
-    C_CORRECT_BG = (30, 120, 30)
-    C_WRONG_BG   = (140, 20, 20)
-    C_CELL_BG    = (35, 38, 60)
-    C_CELL_HL    = (55, 58, 85)
-
-    # grid: 4 cols × 3 rows = 12 slots
     GRID_COLS = 4
-    GRID_ROWS = 3
-    CELL_W    = 200
-    CELL_H    = 180
+    GRID_ROWS = 2
+    CELL_W = 240
+    CELL_H = 210
+
+    C_BG = (12, 15, 35)
+    C_CELL_BG = (36, 40, 65)
+    C_CELL_HL = (58, 64, 96)
+    C_CORRECT_BG = (28, 120, 45)
+    C_WRONG_BG = (145, 35, 35)
+
+    SHAPE_NAMES = {
+        "trojuhelnik": "Trojuhelnik",
+        "ctverec": "Ctverec",
+        "obdelnik": "Obdelnik",
+        "petiuhelnik": "Petiuhelnik",
+        "sestiuhelnik": "Sestiuhelnik",
+        "sedmiuhelnik": "Sedmiuhelnik",
+        "osmiuhelnik": "Osmiuhelnik",
+        "hvezda": "Hvezda",
+        "kruh": "Kruh",
+    }
+
+    SHAPE_COLORS = {
+        "trojuhelnik": (255, 170, 80),
+        "ctverec": (90, 190, 255),
+        "obdelnik": (120, 235, 160),
+        "petiuhelnik": (240, 130, 220),
+        "sestiuhelnik": (255, 215, 90),
+        "sedmiuhelnik": (170, 140, 255),
+        "osmiuhelnik": (255, 120, 120),
+        "hvezda": (255, 245, 110),
+        "kruh": (110, 255, 255),
+    }
 
     def __init__(self):
         super().__init__()
         self.current_round = 0
         self.correct_count = 0
-        self.frame_timer   = 0
-        self.feedback_timer = 0   # >0 while showing correct/wrong flash
-        self.last_correct   = None
-        self.hover_idx      = -1
+        self.feedback_timer = 0
+        self.last_correct = None
+        self.hover_idx = -1
 
-        # Build all 3 rounds
-        self.rounds = [
-            self._build_round_1(),
-            self._build_round_2(),
-            self._build_round_3(),
-        ]
+        self.shape_pool = list(self.SHAPE_NAMES.keys())
+        random.shuffle(self.shape_pool)
+        self.round_targets = self.shape_pool[:self.TOTAL_ROUNDS]
+
+        self.current_options = []
+        self.correct_option_idx = -1
+        self.selected_idx = -1
         self._prepare_round()
 
-    # ------------------------------------------------------------------
-    # POLYGON HELPERS
-    # ------------------------------------------------------------------
     @staticmethod
-    def _regular_polygon(cx, cy, r, n, rot_deg=0):
-        """Return list of (x,y) for a regular n-gon centred at (cx,cy)."""
+    def _regular_polygon(cx, cy, r, n):
         pts = []
         for i in range(n):
-            a = math.radians(rot_deg + 360 * i / n - 90)
+            a = math.radians(360 * i / n - 90)
             pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
         return pts
 
-    @staticmethod
-    def _rotate_pts(pts, cx, cy, deg):
-        """Rotate a list of points around (cx,cy) by deg degrees."""
-        a = math.radians(deg)
-        cos_a, sin_a = math.cos(a), math.sin(a)
-        out = []
-        for x, y in pts:
-            dx, dy = x - cx, y - cy
-            out.append((cx + dx * cos_a - dy * sin_a, cy + dx * sin_a + dy * cos_a))
-        return out
+    def _star(self, cx, cy, r_out, r_in, n=5):
+        pts = []
+        for i in range(n * 2):
+            r = r_out if i % 2 == 0 else r_in
+            a = math.radians(360 * i / (n * 2) - 90)
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+        return pts
 
-    @staticmethod
-    def _scale_pts(pts, cx, cy, s):
-        """Scale points relative to centre."""
-        return [(cx + (x - cx) * s, cy + (y - cy) * s) for x, y in pts]
-
-    @staticmethod
-    def _stretch_pts(pts, cx, cy, sx, sy):
-        """Non-uniform scale."""
-        return [(cx + (x - cx) * sx, cy + (y - cy) * sy) for x, y in pts]
-
-    @staticmethod
-    def _move_vertex(pts, idx, dx, dy):
-        """Return copy with one vertex shifted."""
-        out = list(pts)
-        x, y = out[idx]
-        out[idx] = (x + dx, y + dy)
-        return out
-
-    # ------------------------------------------------------------------
-    # SHAPE DRAW  (all shapes are drawn as filled+outlined polygons)
-    # ------------------------------------------------------------------
     def _draw_poly(self, surf, pts, fill, outline=(0, 0, 0), ow=3):
         if len(pts) < 3:
             return
         pygame.draw.polygon(surf, fill, pts)
         pygame.draw.polygon(surf, outline, pts, ow)
 
-    # ------------------------------------------------------------------
-    # BUILD ROUNDS
-    # ------------------------------------------------------------------
-    def _build_round_1(self):
-        """Pentagon recognition – 12 options, 1 correct."""
-        colour = self.C_PURPLE
-        cx, cy = 0, 0  # placeholder; will be offset at draw time
-        r = 50          # drawing radius for grid cells
+    def _draw_shape(self, screen, shape_name, cx, cy, scale=1.0):
+        col = self.SHAPE_COLORS.get(shape_name, CYAN)
+        scale = max(0.7, scale)
 
-        def target(cx, cy):
-            return self._rotate_pts(self._regular_polygon(cx, cy, r, 5), cx, cy, 30)
+        r_circle = int(45 * scale)
+        rect_w = int(112 * scale)
+        rect_h = int(68 * scale)
+        r_star_out = int(48 * scale)
+        r_star_in = int(22 * scale)
+        r_poly = int(48 * scale)
+        r_tri = int(52 * scale)
+        r_sq = int(46 * scale)
 
-        def make(cx, cy):
-            """All 12 option generators. Index 0 = correct."""
-            return [
-                # 0 correct: pentagon 30°
-                target(cx, cy),
-                # 1 pentagon -20°
-                self._rotate_pts(self._regular_polygon(cx, cy, r, 5), cx, cy, -20),
-                # 2 pentagon 45°
-                self._rotate_pts(self._regular_polygon(cx, cy, r, 5), cx, cy, 45),
-                # 3 pentagon -60°
-                self._rotate_pts(self._regular_polygon(cx, cy, r, 5), cx, cy, -60),
-                # 4 hexagon 30°
-                self._rotate_pts(self._regular_polygon(cx, cy, r, 6), cx, cy, 30),
-                # 5 heptagon 30°
-                self._rotate_pts(self._regular_polygon(cx, cy, r, 7), cx, cy, 30),
-                # 6 star 5-pointed
-                self._star(cx, cy, r, r * 0.45, 5, 0),
-                # 7 pentagon stretched horiz
-                self._stretch_pts(self._rotate_pts(self._regular_polygon(cx, cy, r, 5), cx, cy, 30), cx, cy, 1.35, 0.85),
-                # 8 pentagon small
-                self._scale_pts(self._rotate_pts(self._regular_polygon(cx, cy, r, 5), cx, cy, 30), cx, cy, 0.6),
-                # 9 pentagon large
-                self._scale_pts(self._rotate_pts(self._regular_polygon(cx, cy, r, 5), cx, cy, 30), cx, cy, 1.45),
-                # 10 pentagon with shifted vertex
-                self._move_vertex(self._rotate_pts(self._regular_polygon(cx, cy, r, 5), cx, cy, 30), 2, 12, -10),
-                # 11 diamond (4 sides)
-                self._rotate_pts(self._regular_polygon(cx, cy, r, 4), cx, cy, 30),
-            ]
+        if shape_name == "kruh":
+            pygame.draw.circle(screen, col, (cx, cy), r_circle)
+            pygame.draw.circle(screen, BLACK, (cx, cy), r_circle, 3)
+        elif shape_name == "obdelnik":
+            rect = pygame.Rect(cx - rect_w // 2, cy - rect_h // 2, rect_w, rect_h)
+            pygame.draw.rect(screen, col, rect)
+            pygame.draw.rect(screen, BLACK, rect, 3)
+        elif shape_name == "hvezda":
+            self._draw_poly(screen, self._star(cx, cy, r_star_out, r_star_in), col)
+        elif shape_name == "trojuhelnik":
+            self._draw_poly(screen, self._regular_polygon(cx, cy, r_tri, 3), col)
+        elif shape_name == "ctverec":
+            self._draw_poly(screen, self._regular_polygon(cx, cy, r_sq, 4), col)
+        elif shape_name == "petiuhelnik":
+            self._draw_poly(screen, self._regular_polygon(cx, cy, r_poly, 5), col)
+        elif shape_name == "sestiuhelnik":
+            self._draw_poly(screen, self._regular_polygon(cx, cy, r_poly, 6), col)
+        elif shape_name == "sedmiuhelnik":
+            self._draw_poly(screen, self._regular_polygon(cx, cy, r_poly, 7), col)
+        elif shape_name == "osmiuhelnik":
+            self._draw_poly(screen, self._regular_polygon(cx, cy, r_poly, 8), col)
 
-        return {
-            "title": "KOLO 1/3 – ROTAČNÍ BLUDIŠTĚ",
-            "subtitle": "Najdi přesný pětiúhelník otočený o 30°",
-            "colour": colour,
-            "correct_idx": 0,
-            "make_fn": make,
-            "target_fn": target,
-        }
-
-    def _star(self, cx, cy, r_out, r_in, n, rot_deg):
-        pts = []
-        for i in range(n * 2):
-            r = r_out if i % 2 == 0 else r_in
-            a = math.radians(rot_deg + 360 * i / (n * 2) - 90)
-            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
-        return pts
-
-    def _build_round_2(self):
-        """Scalene triangle 60° rotation."""
-        colour = self.C_ORANGE
-
-        # Scalene base: sides ~40, 50, 60 (half-sizes for grid-cell rendering)
-        def scalene(cx, cy):
-            return [(cx - 30, cy + 25), (cx + 40, cy + 25), (cx + 5, cy - 35)]
-
-        def target(cx, cy):
-            return self._rotate_pts(scalene(cx, cy), cx, cy, 60)
-
-        def isosceles(cx, cy):
-            return [(cx - 30, cy + 25), (cx + 30, cy + 25), (cx, cy - 35)]
-
-        def equilateral(cx, cy):
-            return self._regular_polygon(cx, cy, 42, 3)
-
-        def right_tri(cx, cy):
-            return [(cx - 30, cy + 30), (cx + 35, cy + 30), (cx - 30, cy - 30)]
-
-        def make(cx, cy):
-            return [
-                # 0 correct: scalene 60°
-                target(cx, cy),
-                # 1 isosceles 60°
-                self._rotate_pts(isosceles(cx, cy), cx, cy, 60),
-                # 2 equilateral 60°
-                self._rotate_pts(equilateral(cx, cy), cx, cy, 60),
-                # 3 scalene -60°
-                self._rotate_pts(scalene(cx, cy), cx, cy, -60),
-                # 4 scalene 0°
-                scalene(cx, cy),
-                # 5 scalene 90°
-                self._rotate_pts(scalene(cx, cy), cx, cy, 90),
-                # 6 scalene 0.7x
-                self._scale_pts(self._rotate_pts(scalene(cx, cy), cx, cy, 60), cx, cy, 0.7),
-                # 7 scalene 1.5x
-                self._scale_pts(self._rotate_pts(scalene(cx, cy), cx, cy, 60), cx, cy, 1.4),
-                # 8 scalene stretched
-                self._stretch_pts(self._rotate_pts(scalene(cx, cy), cx, cy, 60), cx, cy, 1.3, 0.8),
-                # 9 right triangle 60°
-                self._rotate_pts(right_tri(cx, cy), cx, cy, 60),
-                # 10 diamond
-                self._rotate_pts(self._regular_polygon(cx, cy, 40, 4), cx, cy, 60),
-                # 11 trapezoid
-                self._rotate_pts([(cx - 35, cy + 25), (cx + 35, cy + 25), (cx + 20, cy - 25), (cx - 20, cy - 25)], cx, cy, 60),
-            ]
-
-        return {
-            "title": "KOLO 2/3 – MĚŘÍTKOVÝ KLAM",
-            "subtitle": "Najdi přesný nerovnostranný trojúhelník otočený o 60°",
-            "colour": colour,
-            "correct_idx": 0,
-            "make_fn": make,
-            "target_fn": target,
-        }
-
-    def _build_round_3(self):
-        """Isosceles trapezoid 25° rotation."""
-        colour = self.C_CYAN
-
-        def iso_trap(cx, cy):
-            # top=30 half-width, bottom=70 half-width, height=45
-            return [(cx - 30, cy - 22), (cx + 30, cy - 22),
-                    (cx + 55, cy + 23), (cx - 55, cy + 23)]
-
-        def target(cx, cy):
-            return self._rotate_pts(iso_trap(cx, cy), cx, cy, 25)
-
-        def right_trap(cx, cy):
-            return [(cx - 30, cy - 25), (cx + 30, cy - 25),
-                    (cx + 55, cy + 25), (cx - 30, cy + 25)]
-
-        def parallelogram(cx, cy):
-            return [(cx - 35, cy + 20), (cx + 15, cy - 20),
-                    (cx + 50, cy - 20), (cx, cy + 20)]
-
-        def rectangle(cx, cy):
-            return [(cx - 40, cy - 22), (cx + 40, cy - 22),
-                    (cx + 40, cy + 22), (cx - 40, cy + 22)]
-
-        def make(cx, cy):
-            return [
-                # 0 correct: iso trapezoid 25°
-                target(cx, cy),
-                # 1 iso trap -25°
-                self._rotate_pts(iso_trap(cx, cy), cx, cy, -25),
-                # 2 iso trap 0°
-                iso_trap(cx, cy),
-                # 3 iso trap 45°
-                self._rotate_pts(iso_trap(cx, cy), cx, cy, 45),
-                # 4 iso trap 90°
-                self._rotate_pts(iso_trap(cx, cy), cx, cy, 90),
-                # 5 right trapezoid 25°
-                self._rotate_pts(right_trap(cx, cy), cx, cy, 25),
-                # 6 iso trap 0.8x
-                self._scale_pts(self._rotate_pts(iso_trap(cx, cy), cx, cy, 25), cx, cy, 0.8),
-                # 7 iso trap 1.3x
-                self._scale_pts(self._rotate_pts(iso_trap(cx, cy), cx, cy, 25), cx, cy, 1.3),
-                # 8 iso trap skewed
-                self._stretch_pts(self._rotate_pts(iso_trap(cx, cy), cx, cy, 25), cx, cy, 0.85, 1.2),
-                # 9 parallelogram 25°
-                self._rotate_pts(parallelogram(cx, cy), cx, cy, 25),
-                # 10 rectangle 25°
-                self._rotate_pts(rectangle(cx, cy), cx, cy, 25),
-                # 11 irregular quad
-                self._rotate_pts([(cx - 40, cy - 15), (cx + 25, cy - 30),
-                                  (cx + 45, cy + 10), (cx - 20, cy + 30)], cx, cy, 25),
-            ]
-
-        return {
-            "title": "KOLO 3/3 – EXTRÉMNÍ VÝZVA",
-            "subtitle": "Najdi přesný rovnoramenný lichoběžník otočený o 25°",
-            "colour": colour,
-            "correct_idx": 0,
-            "make_fn": make,
-            "target_fn": target,
-        }
-
-    # ------------------------------------------------------------------
-    # ROUND MANAGEMENT
-    # ------------------------------------------------------------------
     def _prepare_round(self):
-        """Shuffle option order for current round and reset timer."""
-        rd = self.rounds[self.current_round]
-        # Build index map: positions 0-11, then shuffle, record where correct ended up
-        order = list(range(12))
-        random.shuffle(order)
-        rd["order"] = order
-        # correct answer grid index
-        rd["answer_pos"] = order.index(rd["correct_idx"])
-        self.frame_timer = 0
+        target = self.round_targets[self.current_round]
+        distractors = [s for s in self.shape_pool if s != target]
+        distractors = random.sample(distractors, self.OPTIONS_PER_ROUND - 1)
+        self.current_options = [target] + distractors
+        random.shuffle(self.current_options)
+        self.correct_option_idx = self.current_options.index(target)
         self.feedback_timer = 0
+        self.last_correct = None
+        self.selected_idx = -1
 
-    # ------------------------------------------------------------------
-    # EVENTS
-    # ------------------------------------------------------------------
+    def _cell_at(self, pos):
+        mx, my = pos
+        ox = (SCREEN_WIDTH - self.GRID_COLS * self.CELL_W) // 2
+        oy = 320
+        col = (mx - ox) // self.CELL_W
+        row = (my - oy) // self.CELL_H
+        if 0 <= col < self.GRID_COLS and 0 <= row < self.GRID_ROWS:
+            idx = row * self.GRID_COLS + col
+            if idx < self.OPTIONS_PER_ROUND:
+                return idx
+        return -1
+
     def handle_event(self, event):
         if self.won or self.lost:
             return
         if self.feedback_timer > 0:
-            return  # ignore clicks during flash
+            return
 
         if event.type == pygame.MOUSEMOTION:
             self.hover_idx = self._cell_at(event.pos)
@@ -3480,46 +4718,27 @@ class RotatingImage(BaseGame):
             idx = self._cell_at(event.pos)
             if idx < 0:
                 return
-            rd = self.rounds[self.current_round]
-            picked_shape_idx = rd["order"][idx]
-            if picked_shape_idx == rd["correct_idx"]:
+
+            self.selected_idx = idx
+            if idx == self.correct_option_idx:
                 self.correct_count += 1
                 self.last_correct = True
+                if hasattr(self, "sfx"):
+                    self.sfx.play("level_success")
             else:
                 self.last_correct = False
-            self.feedback_timer = 60  # 1 second flash
+                if hasattr(self, "sfx"):
+                    self.sfx.play("level_fail")
+            self.feedback_timer = 45
 
-    def _cell_at(self, pos):
-        """Return 0-11 grid index or -1."""
-        mx, my = pos
-        ox = (SCREEN_WIDTH - self.GRID_COLS * self.CELL_W) // 2
-        oy = 480
-        col = (mx - ox) // self.CELL_W
-        row = (my - oy) // self.CELL_H
-        if 0 <= col < self.GRID_COLS and 0 <= row < self.GRID_ROWS:
-            return row * self.GRID_COLS + col
-        return -1
-
-    # ------------------------------------------------------------------
-    # UPDATE
-    # ------------------------------------------------------------------
     def update(self):
         if self.won or self.lost:
             return
 
-        # feedback flash countdown
         if self.feedback_timer > 0:
             self.feedback_timer -= 1
             if self.feedback_timer == 0:
                 self._advance_round()
-            return
-
-        self.frame_timer += 1
-        limit = self.ROUND_FRAMES[self.current_round]
-        if self.frame_timer >= limit:
-            # time ran out – counts as wrong
-            self.last_correct = False
-            self.feedback_timer = 60
 
     def _advance_round(self):
         self.current_round += 1
@@ -3531,113 +4750,78 @@ class RotatingImage(BaseGame):
         else:
             self._prepare_round()
 
-    # ------------------------------------------------------------------
-    # DRAW
-    # ------------------------------------------------------------------
     def draw(self, screen):
-        screen.fill((10, 12, 28))
+        screen.fill(self.C_BG)
 
         if self.won or self.lost:
             self._draw_end_screen(screen)
             return
 
-        rd = self.rounds[self.current_round]
-        colour = rd["colour"]
+        target_name = self.round_targets[self.current_round]
+        label = self.SHAPE_NAMES[target_name]
 
-        # --- header ---
-        t = FONT_MEDIUM.render("ROZPOZNEJ TVAR – HARD", True, CYAN)
-        screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, 10))
+        title = FONT_MEDIUM.render("ROZPOZNEJ TVAR", True, CYAN)
+        screen.blit(title, (SCREEN_WIDTH // 2 - title.get_width() // 2, 18))
 
-        rt = FONT_SMALL.render(rd["title"], True, YELLOW)
-        screen.blit(rt, (SCREEN_WIDTH // 2 - rt.get_width() // 2, 65))
+        ask = FONT_SMALL.render(f"Najdi: {label}", True, YELLOW)
+        screen.blit(ask, (SCREEN_WIDTH // 2 - ask.get_width() // 2, 78))
 
-        sub = FONT_TINY.render(rd["subtitle"], True, LIGHT_GRAY)
-        screen.blit(sub, (SCREEN_WIDTH // 2 - sub.get_width() // 2, 100))
-
-        # score + timer
-        secs_left = max(0, (self.ROUND_FRAMES[self.current_round] - self.frame_timer) // 60)
         info = FONT_SMALL.render(
-            f"Skóre: {self.correct_count}/{self.current_round}  |  ⏱ 0:{secs_left:02d}", True, WHITE)
-        screen.blit(info, (SCREEN_WIDTH // 2 - info.get_width() // 2, 130))
+            f"Kolo: {self.current_round + 1}/{self.TOTAL_ROUNDS}   Spravne: {self.correct_count}",
+            True,
+            WHITE,
+        )
+        screen.blit(info, (SCREEN_WIDTH // 2 - info.get_width() // 2, 120))
 
-        # --- target shape (large, centred) ---
-        target_cx = SCREEN_WIDTH // 2
-        target_cy = 280
-        target_pts = rd["target_fn"](target_cx, target_cy)
-        # scale up target for visibility
-        target_pts = self._scale_pts(target_pts, target_cx, target_cy, 1.6)
-        self._draw_poly(screen, target_pts, colour)
-        # label
-        lbl = FONT_TINY.render("▶ CÍLOVÝ TVAR ◀", True, WHITE)
-        screen.blit(lbl, (SCREEN_WIDTH // 2 - lbl.get_width() // 2, 355))
-
-        # --- border around target area ---
-        pygame.draw.rect(screen, colour,
-                         (SCREEN_WIDTH // 2 - 160, 195, 320, 175), 2)
-
-        # --- option grid ---
         ox = (SCREEN_WIDTH - self.GRID_COLS * self.CELL_W) // 2
-        oy = 480
+        oy = 320
 
-        for i in range(12):
+        for i in range(self.OPTIONS_PER_ROUND):
             col = i % self.GRID_COLS
             row = i // self.GRID_COLS
             rx = ox + col * self.CELL_W
             ry = oy + row * self.CELL_H
-            rect = pygame.Rect(rx, ry, self.CELL_W - 6, self.CELL_H - 6)
+            rect = pygame.Rect(rx, ry, self.CELL_W - 10, self.CELL_H - 10)
 
-            # bg
             bg = self.C_CELL_HL if i == self.hover_idx else self.C_CELL_BG
-            # feedback overlay
             if self.feedback_timer > 0:
-                shape_idx = rd["order"][i]
-                if shape_idx == rd["correct_idx"]:
+                if i == self.correct_option_idx:
                     bg = self.C_CORRECT_BG
-                elif i == self.hover_idx and not self.last_correct:
+                elif i == self.selected_idx and not self.last_correct:
                     bg = self.C_WRONG_BG
 
-            pygame.draw.rect(screen, bg, rect, border_radius=6)
-            pygame.draw.rect(screen, (80, 85, 110), rect, 2, border_radius=6)
+            pygame.draw.rect(screen, bg, rect, border_radius=8)
+            pygame.draw.rect(screen, (90, 96, 130), rect, 2, border_radius=8)
 
-            # draw shape
-            ccx = rx + self.CELL_W // 2 - 3
-            ccy = ry + self.CELL_H // 2 - 3
-            shape_idx = rd["order"][i]
-            pts = rd["make_fn"](ccx, ccy)[shape_idx]
-            self._draw_poly(screen, pts, colour)
+            ccx = rect.centerx
+            ccy = rect.centery + 4
+            pop_scale = 1.0
+            if self.feedback_timer > 0 and i == self.correct_option_idx:
+                phase = self.feedback_timer / 45.0
+                pop_scale = 1.10 + 0.10 * phase
+            self._draw_shape(screen, self.current_options[i], ccx, ccy, pop_scale)
 
-            # number label
             num = FONT_TINY.render(str(i + 1), True, GRAY)
-            screen.blit(num, (rx + 6, ry + 4))
+            screen.blit(num, (rect.x + 8, rect.y + 6))
 
-        # --- instructions ---
-        ins = FONT_TINY.render("Klikni na tvar, který přesně odpovídá cílovému tvaru nahoře!", True, LIGHT_GRAY)
+        ins = FONT_TINY.render("Vyber tvar podle nazvu nahore.", True, LIGHT_GRAY)
         screen.blit(ins, (SCREEN_WIDTH // 2 - ins.get_width() // 2, SCREEN_HEIGHT - 30))
 
     def _draw_end_screen(self, screen):
         if self.won:
             t = FONT_LARGE.render("LEVEL COMPLETE!", True, GREEN)
-            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 80))
+            msg = FONT_SMALL.render("Skvela prace, tvary mas pod kontrolou.", True, YELLOW)
         else:
             t = FONT_LARGE.render("GAME OVER", True, RED)
-            screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 80))
+            msg = FONT_SMALL.render("Potrebujes alespon 2 spravne odpovedi ze 3.", True, LIGHT_GRAY)
 
-        sc = FONT_MEDIUM.render(f"Správně: {self.correct_count} / {self.TOTAL_ROUNDS}", True, WHITE)
-        screen.blit(sc, (SCREEN_WIDTH // 2 - sc.get_width() // 2, SCREEN_HEIGHT // 2 + 10))
-
-        if self.won:
-            msg = FONT_SMALL.render("Výborně! Tvůj zrak je ostrý.", True, YELLOW)
-        else:
-            msg = FONT_SMALL.render("Potřebuješ alespoň 2 ze 3 správně.", True, LIGHT_GRAY)
+        screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 90))
+        sc = FONT_MEDIUM.render(f"Spravne: {self.correct_count} / {self.TOTAL_ROUNDS}", True, WHITE)
+        screen.blit(sc, (SCREEN_WIDTH // 2 - sc.get_width() // 2, SCREEN_HEIGHT // 2 + 5))
         screen.blit(msg, (SCREEN_WIDTH // 2 - msg.get_width() // 2, SCREEN_HEIGHT // 2 + 70))
 
     def get_hint(self):
-        if self.current_round == 0:
-            return "Hledej pětiúhelník otočený přesně o 30° – pozor na šestiúhelníky a hvězdy!"
-        elif self.current_round == 1:
-            return "Nerovnostranný trojúhelník má 3 různé strany. Otočení 60° – ne -60°!"
-        else:
-            return "Lichoběžník: 2 rovnoběžné strany, rovnoramenný, otočený 25°. Pozor na rovnoběžníky!"
+        return "Sleduj nazev nahore a vyber odpovidajici tvar. Tvary nejsou otocene."
 
 
 class LaserMirrors(BaseGame):
@@ -4704,27 +5888,29 @@ class QuantumSwitches(BaseGame):
     """Quantum Switches – activate switches in the right sequence.
     Each switch toggles itself AND specific linked switches."""
 
-    NUM_SW = 7
-    # Link map: pressing switch i also toggles switches in LINKS[i]
+    NUM_SW = 5
+    # Link map: pressing switch i toggles itself + at most one neighbour
     LINKS = {
-        0: [2, 5],
-        1: [3],
-        2: [0, 4],
-        3: [1, 6],
-        4: [2, 5],
-        5: [0, 4, 6],
-        6: [3, 5],
+        0: [1],
+        1: [2],
+        2: [3],
+        3: [4],
+        4: [],
     }
     # Goal: all ON
-    # Known solution order: 1, 4, 0, 6 (verified)
+    # Jednodušší logika: lineární šíření doprava
 
     def __init__(self):
         super().__init__()
-        self.switches = [False] * self.NUM_SW
+        self.switches = [True] * self.NUM_SW
+        self.switch_anim = [1.0] * self.NUM_SW
         self.press_count = 0
-        self.max_presses = 12  # par = 4, generous limit = 12
+        self.max_presses = 7
         self.flash_msg = ""
         self.flash_timer = 0
+        # Start from a scrambled (but solvable) state
+        for idx in [1, 3, 4, 0]:
+            self._toggle(idx)
 
     def _toggle(self, idx):
         self.switches[idx] = not self.switches[idx]
@@ -4752,6 +5938,9 @@ class QuantumSwitches(BaseGame):
                 return
 
     def update(self):
+        for i in range(self.NUM_SW):
+            target = 1.0 if self.switches[i] else 0.0
+            self.switch_anim[i] += (target - self.switch_anim[i]) * 0.22
         if self.flash_timer > 0:
             self.flash_timer -= 1
 
@@ -4780,7 +5969,12 @@ class QuantumSwitches(BaseGame):
         for i in range(self.NUM_SW):
             cx = ox + i * 120 + 50
             cy = SCREEN_HEIGHT // 2
-            color = (0, 220, 80) if self.switches[i] else (180, 30, 30)
+            a = max(0.0, min(1.0, self.switch_anim[i]))
+            color = (
+                int(180 * (1 - a) + 0 * a),
+                int(30 * (1 - a) + 220 * a),
+                int(30 * (1 - a) + 80 * a),
+            )
             pygame.draw.circle(screen, color, (cx, cy), 42)
             pygame.draw.circle(screen, WHITE, (cx, cy), 42, 3)
             lbl = FONT_MEDIUM.render(str(i + 1), True, BLACK if self.switches[i] else WHITE)
@@ -4796,7 +5990,7 @@ class QuantumSwitches(BaseGame):
 
         # Link legend
         legend = FONT_TINY.render(
-            "Kazdy prepinac meni i propojene sousedy (cary)!", True, LIGHT_GRAY)
+            "Kazdy prepinac meni sebe a nanejvys jednoho souseda. Premyslej dopredu.", True, LIGHT_GRAY)
         screen.blit(legend, (SCREEN_WIDTH // 2 - legend.get_width() // 2, SCREEN_HEIGHT - 50))
 
         # Flash
@@ -4819,7 +6013,7 @@ class QuantumSwitches(BaseGame):
             screen.blit(t, (SCREEN_WIDTH // 2 - t.get_width() // 2, SCREEN_HEIGHT // 2 - 40))
 
     def get_hint(self):
-        return "Kazdy prepinac meni i propojene. Zkus stisknout 2, 5, 1, 7."
+        return "Nezacinas od nuly: nektere prepinace uz sviti. Planuj par kroku dopredu."
 
 
 # =====================================================================
@@ -5008,36 +6202,34 @@ class RollingBalls(BaseGame):
             "switch_gate": {(5, 3): (6, 4)},
             "ball": (1, 1), "goal": (8, 5), "max_moves": 40,
         },
-        {   # Level 4 – two switches, tight corridors
+        {   # Level 4 – switch & gate, clear corridor
             "grid": [
-                [1,1,1,1,1,1,1,1,1,1,1,1],
-                [1,0,0,0,1,0,0,0,0,0,0,1],
-                [1,0,1,0,0,0,1,0,0,0,0,1],
-                [1,0,0,3,1,0,0,0,0,1,0,1],
-                [1,1,0,1,1,4,0,0,1,1,0,1],
-                [1,0,0,0,0,0,0,0,0,0,0,1],
-                [1,0,0,0,1,3,1,0,4,0,0,1],
-                [1,0,0,0,0,0,0,0,0,0,0,1],
-                [1,1,1,1,1,1,1,1,1,1,1,1],
+                [1,1,1,1,1,1,1,1,1,1],
+                [1,0,0,0,0,1,0,0,0,1],
+                [1,0,1,0,0,3,0,1,0,1],
+                [1,1,1,1,1,1,4,1,1,1],
+                [1,0,0,0,0,0,0,0,0,1],
+                [1,0,1,0,0,0,0,1,0,1],
+                [1,0,0,0,0,0,0,0,0,1],
+                [1,1,1,1,1,1,1,1,1,1],
             ],
-            "switch_gate": {(3, 3): (5, 4), (5, 6): (8, 6)},
-            "ball": (1, 1), "goal": (10, 7), "max_moves": 45,
+            "switch_gate": {(5, 2): (6, 3)},
+            "ball": (1, 1), "goal": (8, 6), "max_moves": 30,
         },
-        {   # Level 5 – maze-like, multiple gates
+        {   # Level 5 – two switches, two gates
             "grid": [
                 [1,1,1,1,1,1,1,1,1,1,1,1],
                 [1,0,0,0,0,1,0,0,0,0,0,1],
-                [1,0,1,0,0,0,0,1,0,1,0,1],
-                [1,0,0,0,1,3,0,0,0,0,0,1],
-                [1,1,0,1,1,1,4,0,1,0,1,1],
-                [1,0,0,0,0,0,0,0,0,3,0,1],
-                [1,0,1,0,1,0,1,0,4,0,0,1],
+                [1,0,1,0,0,3,0,0,1,0,0,1],
+                [1,1,1,1,1,1,4,1,1,1,1,1],
                 [1,0,0,0,0,0,0,0,0,0,0,1],
-                [1,0,0,0,1,0,0,1,0,0,0,1],
+                [1,0,1,0,0,0,0,3,0,1,0,1],
+                [1,1,1,1,1,1,1,1,4,1,1,1],
+                [1,0,0,0,0,0,0,0,0,0,0,1],
                 [1,1,1,1,1,1,1,1,1,1,1,1],
             ],
-            "switch_gate": {(5, 3): (6, 4), (9, 5): (8, 6)},
-            "ball": (1, 1), "goal": (10, 8), "max_moves": 50,
+            "switch_gate": {(5, 2): (6, 3), (7, 5): (8, 6)},
+            "ball": (1, 1), "goal": (10, 7), "max_moves": 35,
         },
     ]
 
