@@ -1,0 +1,58 @@
+{
+  "nickname": "tibor",
+  "passwordHash": "feed0edba9aac6b914be3971466d1def8232b98e4dc1ba5ddaa4e1fc104ec902",
+  "current_level": 2,
+  "unlocked_levels": 2,
+  "player_score": 0,
+  "current_theme": "Neon",
+  "player_settings": {
+    "screen_shake": true,
+    "screen_glow": true,
+    "master_volume": 70
+  },
+  "inventory": [],
+  "level_stars": {
+    "1": 3
+  },
+  "level_best_time": {
+    "1": 4.923
+  },
+  "level_best_reaction_ms": {},
+  "level_best_moves": {},
+  "completed_levels": [
+    1
+  ],
+  "achievements": {
+    "level_1": true,
+    "level_2": false,
+    "level_3": false,
+    "level_4": false,
+    "level_5": false,
+    "level_6": false,
+    "level_7": false,
+    "level_8": false,
+    "level_9": false,
+    "level_10": false,
+    "level_11": false,
+    "level_12": false,
+    "level_13": false,
+    "level_14": false,
+    "level_15": false,
+    "level_16": false,
+    "level_17": false,
+    "level_18": false,
+    "level_19": false,
+    "level_20": false,
+    "record_l1": true,
+    "speed_l1": true,
+    "speed_l8": false,
+    "all_levels": false
+  },
+  "graphics": {
+    "resolution": "1920x1080",
+    "fullscreen": false,
+    "vsync": true,
+    "ui_scale": 100
+  },
+  "checksum": "6945109fc360c52e8b0442eac505ac7f8785c2790076a17cd7ee41091bfc34d2"
+}
